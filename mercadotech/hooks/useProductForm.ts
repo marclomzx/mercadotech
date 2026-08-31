@@ -9,6 +9,7 @@ import {
   validateProduct,
   type ValidationErrors,
 } from "@/lib/validators/product";
+import { triggerReindex } from "@/services/indexing-trigger.service";
 import * as productService from "@/services/product.service";
 import * as sellerService from "@/services/seller.service";
 import * as storageService from "@/services/storage.service";
@@ -256,6 +257,10 @@ export function useProductForm({ sellerId, productId }: UseProductFormOptions) {
 
       if (mode === "edit" && productId) {
         await sellerService.updateProduct(productId, payload);
+        // Reindexado best-effort: va DESPUÉS de que el cambio está
+        // persistido, no se espera y no puede lanzar. Si falla, el vendedor
+        // no se entera (ver indexing-trigger.service).
+        triggerReindex("producto", productId);
         return productId;
       }
 
@@ -275,6 +280,10 @@ export function useProductForm({ sellerId, productId }: UseProductFormOptions) {
         );
         await storageService.addProductImage(product.id, path, index);
       }
+
+      // Igual que en edit: el producto y sus imágenes ya están guardados,
+      // así que un fallo de indexación no puede afectar a la publicación.
+      triggerReindex("producto", product.id);
 
       return product.id;
     } finally {
