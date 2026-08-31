@@ -141,6 +141,39 @@ export type Database = {
           },
         ]
       }
+      knowledge_embeddings: {
+        Row: {
+          chunk_index: number
+          content: string
+          created_at: string
+          embedding: string
+          id: string
+          metadata: Json
+          source_id: string
+          source_type: string
+        }
+        Insert: {
+          chunk_index?: number
+          content: string
+          created_at?: string
+          embedding: string
+          id?: string
+          metadata?: Json
+          source_id: string
+          source_type: string
+        }
+        Update: {
+          chunk_index?: number
+          content?: string
+          created_at?: string
+          embedding?: string
+          id?: string
+          metadata?: Json
+          source_id?: string
+          source_type?: string
+        }
+        Relationships: []
+      }
       order_items: {
         Row: {
           id: string
@@ -578,6 +611,21 @@ export type Database = {
     Functions: {
       create_order_from_cart: { Args: { p_buyer_id: string }; Returns: string }
       is_admin: { Args: never; Returns: boolean }
+      match_knowledge: {
+        Args: {
+          match_count?: number
+          p_source_type?: string
+          query_embedding: string
+          similarity_threshold?: number
+        }
+        Returns: {
+          content: string
+          metadata: Json
+          similarity: number
+          source_id: string
+          source_type: string
+        }[]
+      }
       order_has_own_item: { Args: { p_order_id: string }; Returns: boolean }
     }
     Enums: {

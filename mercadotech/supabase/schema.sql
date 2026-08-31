@@ -11,6 +11,9 @@
 
 create extension if not exists pgcrypto with schema extensions;
 
+-- pgvector (sesión 4): tipo `vector` y operadores de distancia para el RAG.
+create extension if not exists vector with schema extensions;
+
 -- ============================================================
 -- Funciones auxiliares
 -- ============================================================
@@ -383,3 +386,79 @@ $$;
 revoke execute on function public.create_order_from_cart(uuid) from public;
 revoke execute on function public.create_order_from_cart(uuid) from anon;
 grant execute on function public.create_order_from_cart(uuid) to authenticated;
+
+-- ============================================================
+-- KNOWLEDGE_EMBEDDINGS (sesión 4) — el "fichero" del RAG
+-- ============================================================
+
+-- UNA tabla para las dos fuentes (productos y artículos de soporte),
+-- discriminada por source_type: ambas tienen la misma forma y se consultan
+-- juntas. Ver la migración 20260831120100 para el detalle de las decisiones.
+create table public.knowledge_embeddings (
+  id uuid primary key default gen_random_uuid(),
+  source_type text not null check (source_type in ('producto', 'articulo_soporte')),
+  -- SIN foreign key: apunta a dos tablas origen distintas según source_type.
+  -- Consecuencia: pueden quedar fichas huérfanas; las descarta el service al
+  -- hidratar, y el reindexado las limpia.
+  source_id uuid not null,
+  chunk_index integer not null default 0,
+  content text not null,
+  -- ⚠️ La dimensión 384 (all-MiniLM-L6-v2) queda grabada acá: cambiar de
+  -- modelo a otra dimensión exige ALTER COLUMN ... TYPE vector(N) + recrear
+  -- el índice HNSW y la función match_knowledge, y re-generar las fichas.
+  embedding extensions.vector(384) not null,
+  metadata jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  unique (source_type, source_id, chunk_index)
+);
+
+alter table public.knowledge_embeddings enable row level security;
+
+create index knowledge_embeddings_embedding_hnsw
+  on public.knowledge_embeddings
+  using hnsw (embedding extensions.vector_cosine_ops);
+
+create index knowledge_embeddings_source_type_idx
+  on public.knowledge_embeddings (source_type);
+
+-- ============================================================
+-- Función match_knowledge (sesión 4)
+-- ============================================================
+
+-- SECURITY INVOKER (a diferencia de create_order_from_cart): solo lee, y debe
+-- respetar la visibilidad del caller para que un anónimo no obtenga fichas.
+create function public.match_knowledge(
+  query_embedding extensions.vector(384),
+  p_source_type text default null,
+  match_count int default 5,
+  similarity_threshold float default 0.3
+)
+returns table (
+  source_type text,
+  source_id uuid,
+  content text,
+  metadata jsonb,
+  similarity float
+)
+language sql
+stable
+security invoker
+set search_path = public, extensions
+as $$
+  select
+    ke.source_type,
+    ke.source_id,
+    ke.content,
+    ke.metadata,
+    1 - (ke.embedding <=> query_embedding) as similarity
+  from public.knowledge_embeddings ke
+  where
+    (p_source_type is null or ke.source_type = p_source_type)
+    and 1 - (ke.embedding <=> query_embedding) >= similarity_threshold
+  order by ke.embedding <=> query_embedding
+  limit match_count;
+$$;
+
+revoke execute on function public.match_knowledge(extensions.vector, text, int, float) from public;
+revoke execute on function public.match_knowledge(extensions.vector, text, int, float) from anon;
+grant execute on function public.match_knowledge(extensions.vector, text, int, float) to authenticated;

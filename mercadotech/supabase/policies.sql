@@ -636,3 +636,28 @@ create policy "avatars_bucket_delete_own_folder" on storage.objects
     bucket_id = 'avatars'
     and (storage.foldername(name))[1] = (select auth.uid())::text
   );
+
+-- ============================================================
+-- KNOWLEDGE_EMBEDDINGS (sesión 4, Fase 4.1)
+-- ============================================================
+
+-- ⚠️ El `revoke all on all tables in schema public` del inicio de este archivo
+-- NO cubre esta tabla: se creó después. Y Supabase mantiene un
+-- ALTER DEFAULT PRIVILEGES que otorga ALL a anon/authenticated sobre cada
+-- tabla nueva. Sin este REVOKE explícito, anon tendría SELECT (y DELETE)
+-- sobre las fichas pese a no aparecer en ningún GRANT de abajo.
+revoke all on public.knowledge_embeddings from anon, authenticated;
+
+-- Decisión 1 de la spec: la IA exige sesión iniciada. SELECT para
+-- `authenticated` y NO para `anon`.
+grant select on public.knowledge_embeddings to authenticated;
+
+-- INSERT/UPDATE/DELETE: sin GRANT y sin política, a propósito. Solo el
+-- cliente service_role (que bypassa RLS) escribe fichas, desde el Route
+-- Handler de reindexado y el script index-all. Permitir que un usuario
+-- fabrique fichas sería permitirle envenenar el contexto que lee el modelo.
+
+create policy "knowledge_embeddings_select_authenticated" on public.knowledge_embeddings
+  for select
+  to authenticated
+  using (true);
