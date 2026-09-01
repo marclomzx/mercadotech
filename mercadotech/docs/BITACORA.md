@@ -20,6 +20,226 @@ fuera a propósito.
 
 ---
 
+## Sesión 5 — Servidor MCP y ciclo de gobernanza (2026-08-31 / 2026-09-01)
+
+**Alcance:** servidor MCP de solo lectura (`mcp/`) que expone el catálogo,
+categorías, reseñas y asistencia de MercadoTech por stdio — 10 tools, 7
+resources y 5 Prompts MCP — más 4 Skills de gobernanza que revisan ubicación
+de archivos, calidad de código, diseño y aprobación binaria del propio
+proyecto Next.js. 57 archivos, +5810 líneas (`git diff --stat 8f4fa9a..HEAD`;
+`8f4fa9a` es un chore de seed de imágenes ajeno a esta sesión, hecho entre el
+cierre de la sesión 4 y el inicio de esta).
+
+> Mismo aviso que las sesiones 3 y 4: los commits de Fase 5.1 a 5.5 se
+> crearon el 2026-08-31; el ciclo de revisión de gobernanza (Fase 5.6) corrió
+> al día siguiente, 2026-09-01, sobre el mismo código ya commiteado.
+
+### Prompt 0 — Provisión (commit `d326f46`)
+
+**Construido:** `mcp/package.json`, `mcp/.gitignore` y las dependencias del
+servidor (`@modelcontextprotocol/sdk`, `zod`, `@supabase/supabase-js`,
+`tsup`, `tsx`) — sin tocar el `package.json` de la raíz: `mcp/` es un
+proyecto Node independiente que solo comparte el `tsconfig` base y el alias
+`@/*` hacia la raíz.
+
+### Fase 5.1 — Skills de gobernanza (commit `e707ae0`)
+
+**Construido:** 4 Skills en `.claude/skills/`: `mercadotech-architecture-enforcer`
+(gate previo de ubicación de archivos), `mercadotech-code-reviewer` (informe
+de PR con calificación /10), `mercadotech-tech-lead` (juicio de diseño
+ponderado, scorecard) y `mercadotech-automatic-validator` (veredicto binario
+APROBADA/FALLIDA sobre una checklist fija).
+
+**Decisión — cuatro roles separados, no una sola Skill de "revisión":** cada
+una responde una pregunta distinta y con una superficie de salida distinta
+(gate previo vs. informe con nota vs. scorecard ponderado vs. veredicto
+binario); mezclarlas habría hecho que "revisa esto" significara cosas
+distintas según quién preguntara. `CLAUDE.md` queda como fuente de verdad de
+las cuatro: ante una contradicción, gana `CLAUDE.md`.
+
+### Fase 5.2 — Scaffold del servidor MCP sobre stdio (commit `18dedbd`)
+
+**Construido:** servidor `mercadotech` vacío que arranca por stdio sin
+corromper el canal JSON-RPC — 0 tools, 0 resources, 0 prompts, pero con toda
+la fontanería delicada resuelta: `lib/stdout-guard.ts` (redirige
+`console.log/info/warn` a stderr, importado primero en `index.ts` porque los
+`import` de ESM se hoistean), `env.ts` (`loadEnvLocal` sobre la `.env.local`
+de la RAÍZ, buscada hacia arriba desde el módulo porque el cliente MCP fija
+un cwd arbitrario), `context.ts` (fábrica de `{anon, admin}` POR LLAMADA, no
+singleton — con el stub de `WebSocket` que Node 20 no expone) y
+`lib/{tool-result,errors,safe}.ts` (formato de salida, errores tipados,
+wrapper try/catch uniforme).
+
+**Decisión — `context.ts` construye sus clientes con `@supabase/supabase-js`
+directamente, no con `lib/supabase/`:** los clientes de la web están
+afinados para navegador/Route Handler/middleware, no para un proceso stdio
+sin sesión ni cookies — mismo criterio que ya había resuelto
+`scripts/index-all.ts`.
+
+### Fase 5.3 — 10 tools MCP de solo lectura (commit `95f5658`)
+
+**Construido:** `search_products`, `get_product`, `list_categories`,
+`semantic_search_products`, `ask_assistant`, `compare_products`,
+`find_related_products`, `summarize_reviews`, `get_store_stats`,
+`get_order_status` — un archivo por tool en `mcp/src/tools/`, registro
+central en `tools/index.ts`, `defineTool` envolviendo cada handler en
+`safeTool` y marcándolo `readOnlyHint`. Ninguna tool escribe.
+
+**Decisión — cliente explícito siempre, nunca el default del service:** las
+10 tools pasan `anon` o `admin` a cada llamada de `services/*`; admin solo en
+las 5 que la RLS obliga (`knowledge_embeddings` concede SELECT solo a
+`authenticated`; `orders`/`order_items` filtran por `auth.uid()`).
+
+**Decisión — `get_order_status` recorta la salida a propósito:** solo
+estado, fecha, total e ítems (snapshots de título y precio) — nunca
+`buyer_id` ni datos personales, aunque el cliente admin los tenga delante. El
+comentario en el propio archivo advierte que en producción exigiría
+autenticación del comprador; la reutilizará el agente de voz de la sesión 8.
+
+**Derivaciones documentadas en `mcp/src/shared/`** (sin agregar services
+nuevos al proyecto web): `products.ts` (`getProductsByIds` —
+`product.service.getProductsByIds` no existe en el repo pese a lo que afirma
+la spec de la sesión; se compone `getProductById`) y `stats.ts` (conteo por
+categoría y ranking de más vendidos, este último agregando `order_items` con
+admin y leyendo solo tres columnas, ningún dato personal).
+
+**Decisión — `HUGGINGFACEHUB_API_TOKEN` deja de ser obligatoria al
+arrancar:** sin token, las 4 tools que dependen de IA devuelven el error
+accionable de `lib/ai/` como error de tool (`provider_down`) y las otras 6
+siguen funcionando con normalidad — el servidor nunca se cae por falta de un
+token que solo una parte de las tools necesita.
+
+### Fase 5.4 — Resources y Prompts MCP (commit `20fe5af`)
+
+**Construido:** 7 resources (`mercadotech://info` estático, `products`,
+`products/{id}` y `sellers/{sellerId}` como `ResourceTemplate` con callback
+`list`, `categories`, `faq`, `stats`) y 5 Prompts MCP (`describir_producto`,
+`comparar_productos`, `redactar_respuesta_pregunta`, `resumen_de_resenas`,
+`generar_articulo_faq`), con registro central en `resources/index.ts` y
+`prompts/index.ts`.
+
+**Decisión — cada resource captura sus propios errores:** `safeResource`/
+`safeValue` (ampliados en esta fase) garantizan que `resources/list` nunca
+falle completo — una fuente caída degrada a su fallback en vez de tumbar el
+listado entero.
+
+**Decisión — `sellers/{sellerId}` con cliente admin, recortado a
+propósito:** `profiles` no tiene SELECT público
+(`profiles_select_own_or_admin`), así que con anon esta tabla es invisible
+para un proceso sin sesión; el resource expone solo `display_name` +
+productos activos, nunca `phone`.
+
+**Refactor:** `compare_products` (tool) se subió a `shared/products.ts` como
+`compareProducts`, para que el prompt `comparar_productos` comparta
+exactamente la misma lógica y no recalcule la tabla dos veces con formas
+ligeramente distintas.
+
+### Fase 5.5 — Registro y documentación del servidor MCP (commit `320c0c2`)
+
+**Construido:** `.mcp.json` en la raíz (declara el servidor `mercadotech`
+por stdio para Claude Code), `mcp/README.md` (arquitectura, las decisiones
+de la sesión, comandos, tabla completa de tools/resources/prompts × service
+reutilizado × cliente). `mcp/dist/` se excluyó del `eslint` de la raíz
+(build de `tsup`, no código propio) para que `npm run lint` no falle después
+de `npm run build`.
+
+**Verificado:** pasada completa por el Inspector de MCP (10 tools, 7
+resources, 5 prompts, casos del seed) y build de producción
+(`node mcp/dist/index.js`) sin hallar bugs — no hubo cambios en `mcp/src/`
+en este commit.
+
+### Fase 5.6 — Ciclo de revisión de gobernanza (commits `3947a4c`, `20c12f7`, `0f65f1b`)
+
+**Construido:** primera pasada real de las 4 Skills de la Fase 5.1 sobre su
+propio código — `mercadotech-tech-lead` sobre `mcp/src/` completo y sobre
+`services/`+`hooks/` completos; `mercadotech-code-reviewer` sobre `lib/ai/`,
+los 3 Route Handlers de `app/api/v1/` y `mcp/src/`; `mercadotech-automatic-validator`
+sobre el estado final. Consolidado en `docs/REVISION_S5.md` (una fila por
+hallazgo: severidad, veredicto, evidencia).
+
+**Corregido:** los dos únicos hallazgos de `code-reviewer` (ninguno
+crítico) — URIs sintéticas sin resource real detrás en los prompts
+`comparar_productos`/`redactar_respuesta_pregunta` (ahora bajo
+`mercadotech://ephemeral/...`, commit `3947a4c`) y el log de error de
+`/api/v1/chat`, que incluía el texto completo de la consulta a diferencia
+del log de éxito de la misma ruta (commit `20c12f7`).
+
+**Diferido a propósito, no corregido hoy:** el store módulo-global de
+`useCart` no limpia `items` de forma síncrona al cambiar `userId` — entre el
+logout de un usuario y que resuelva el `loadItems` del siguiente, un
+componente montado puede mostrar por un instante el carrito del anterior en
+la misma pestaña. Bajo riesgo/beneficio (solo se manifiesta en
+login→logout→login sin recargar en la misma pestaña); ver
+`docs/REVISION_S5.md`.
+
+**Confirmado en vivo:** al invocar `ask_assistant` cuatro veces con la misma
+consulta ("laptop liviana para la universidad"), el modelo dio cuatro
+redacciones distintas sobre las mismas 5 fuentes recuperadas (idéntica
+`similitud`) — incluyendo un peso inventado ("1.4 kg") que no existe en
+ninguna descripción del catálogo. No es un hallazgo nuevo: es la
+manifestación directa de la deuda ya documentada en la sesión 4
+(`hasRelevantContext` no confiable, sección (b) de esa sesión) vista ahora
+también desde el servidor MCP.
+
+**Veredicto final:** `VALIDACIÓN APROBADA` — los 4 greps de capas vacíos,
+sin hallazgos críticos pendientes, `lint`/`type-check`/`build` en verde en
+la raíz y en `mcp/`. `npm run test` sigue `N/A` (sesión 6, el script no
+existe todavía).
+
+---
+
+### (a) Criterios de aceptación de la sesión
+
+| Criterio | Estado | Evidencia |
+|---|---|---|
+| Servidor MCP con 10 tools, 7 resources y 5 Prompts registrados | ✅ | Pasada por el Inspector documentada en `mcp/README.md` (Fase 5.5) |
+| Ninguna tool/resource muta datos ni expone información privada de comprador | ✅ | `readOnlyHint: true` por construcción (`defineTool`); `get_order_status` y `sellers/{id}` recortados a propósito (Fase 5.3/5.4) |
+| Servidor operable sin `HUGGINGFACEHUB_API_TOKEN` (degradación parcial, no caída total) | ✅ | Las 6 tools sin dependencia de IA siguen funcionando; las 4 restantes devuelven `provider_down` (Fase 5.3) |
+| Los 4 greps de capas de `CLAUDE.md` vacíos | ✅ | Verificados en la Fase 5.6 sobre el estado final |
+| `lint`, `type-check` y `build` pasan en la raíz y en `mcp/` | ✅ | Los cinco comandos en exit 0 (Fase 5.6, `docs/REVISION_S5.md`) |
+| Las 4 Skills de gobernanza corridas al menos una vez sobre código real | ✅ | Fase 5.6: tech-lead ×2, code-reviewer ×1, automatic-validator ×1 |
+
+### (b) Deuda técnica y limitaciones vigentes (nuevas de la sesión 5)
+
+1. **`useCart` puede mostrar el carrito del usuario anterior por un
+   instante.** El store módulo-global (`useSyncExternalStore`) no limpia
+   `items` de forma síncrona al cambiar `userId`; solo se limpia cuando
+   resuelve el `loadItems` del nuevo usuario. Bajo impacto: requiere
+   login→logout→login en la misma pestaña sin recargar.
+2. **Patrón `fetchX`/`loading`/`error`/`retry` duplicado en 7 hooks**
+   (`useOrders`, `useQuestions`, `useReviews`, `useSellerOrders`,
+   `useSellerProducts`, `useMyTickets`, `useFavorites`). Sostiene bien hasta
+   ahora; si sesión 6 en adelante agrega varios hooks más con la misma
+   forma, extraer un `useAsyncResource` genérico empezaría a pagarse solo.
+3. **`get_order_status` bypasea la RLS con el cliente admin.** Cualquiera
+   que adivine (o consiga) un UUID de pedido puede ver su estado — aceptable
+   en este proyecto de curso con datos de semilla, y documentado en el
+   propio archivo como algo que en un despliegue real exigiría el token de
+   sesión del comprador.
+4. **Dos de los cinco Prompts MCP embebían contenido bajo URIs sin resource
+   real detrás.** Corregido en la Fase 5.6 (commit `3947a4c`) — se deja
+   anotado por si aparece un tercer caso: la convención es
+   `mercadotech://ephemeral/...` para contenido embebido no navegable vía
+   `resources/read`.
+
+### (c) Pendientes
+
+**Heredados de sesiones anteriores (sin cambios en esta sesión):**
+
+- **Sesión 1 completa:** sigue sin ejecutarse. Faltan `docs/COSTOS.md` y
+  `docs/PROMPTS.md`.
+- **Fase 2.6:** `supabase/tests/` sigue vacío (solo `.gitkeep`). Faltan los
+  scripts de validación RLS.
+
+**Para la sesión 6:**
+
+- `npm run test` no existe todavía en el `package.json` de la raíz — la
+  Skill `mercadotech-automatic-validator` lo marca `N/A` hasta entonces.
+- El agente de voz (mencionado como consumidor futuro de `get_order_status`
+  desde la Fase 5.3) es trabajo de la sesión 8, no de esta.
+
+---
+
 ## Sesión 4 — IA integrada con RAG (2026-08-31)
 
 **Alcance:** búsqueda semántica sobre pgvector, y dos asistentes

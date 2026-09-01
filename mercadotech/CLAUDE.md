@@ -112,12 +112,14 @@ públicos — solo la pestaña "Resultados con IA" de `/buscar` pide sesión.
 
 ## Estado del proyecto
 
-* **Completadas:** sesión 2 (infraestructura), sesión 3 (MVP funcional) y
-  sesión 4 (RAG: búsqueda semántica, asesor de compras, soporte con tickets).
+* **Completadas:** sesión 2 (infraestructura), sesión 3 (MVP funcional),
+  sesión 4 (RAG: búsqueda semántica, asesor de compras, soporte con
+  tickets) y sesión 5 (servidor MCP de solo lectura + 4 Skills de
+  gobernanza, con su propio ciclo de revisión ya corrido).
 * **Pendientes heredados:** sesión 1 completa (`docs/COSTOS.md`,
   `docs/PROMPTS.md`) y Fase 2.6 (`supabase/tests/` vacío: faltan los scripts
   de validación RLS).
-* **Siguiente:** sesión 5.
+* **Siguiente:** sesión 6.
 * Detalle por fase, decisiones y limitaciones vigentes en
   [docs/BITACORA.md](docs/BITACORA.md); casos de prueba y calibración del
   RAG en [docs/RAG.md](docs/RAG.md); pasada de calidad de la sesión 3 en
