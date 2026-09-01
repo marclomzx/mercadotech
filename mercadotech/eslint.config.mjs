@@ -12,7 +12,11 @@ const compat = new FlatCompat({
 const eslintConfig = [
   ...compat.extends("next/core-web-vitals", "next/typescript"),
   {
-    ignores: [".next/**", "out/**", "build/**", "next-env.d.ts"],
+    // "mcp/dist/**": salida de `npm run build` en mcp/ (Fase 5.5) — es el
+    // bundle de tsup con el SDK de MCP incluido, no código propio; sin este
+    // ignore, `npm run lint` en la raíz falla apenas alguien construye el
+    // servidor MCP.
+    ignores: [".next/**", "out/**", "build/**", "next-env.d.ts", "mcp/dist/**"],
   },
 ];
 
