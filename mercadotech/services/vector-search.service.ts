@@ -72,6 +72,29 @@ export async function searchByEmbedding(
   }));
 }
 
+type SearchByQueryOptions = {
+  sourceType?: SourceType | null;
+  topK?: number;
+  similarityThreshold?: number;
+};
+
+/**
+ * Búsqueda semántica cruda: texto → fichas más parecidas, sin hidratar.
+ *
+ * Es el punto de entrada que usa chat.service (Fase 4.6) para los dos modos,
+ * cambiando solo `sourceType`. Vive acá y no en chat.service para que ese
+ * servicio no tenga que conocer `generateEmbedding` — es decir, para que no
+ * conozca al proveedor de IA. Con `sourceType` null busca en ambas fuentes.
+ */
+export async function searchByQuery(
+  query: string,
+  opts: SearchByQueryOptions = {},
+  supabase: Client = createClient(),
+): Promise<VectorMatch[]> {
+  const embedding = await generateEmbedding(query);
+  return searchByEmbedding(embedding, opts, supabase);
+}
+
 type SearchProductsOptions = {
   topK?: number;
   similarityThreshold?: number;
@@ -94,10 +117,8 @@ export async function searchProducts(
   opts: SearchProductsOptions = {},
   supabase: Client = createClient(),
 ): Promise<SemanticProductResult[]> {
-  const embedding = await generateEmbedding(query);
-
-  const matches = await searchByEmbedding(
-    embedding,
+  const matches = await searchByQuery(
+    query,
     { sourceType: "producto", topK: opts.topK, similarityThreshold: opts.similarityThreshold },
     supabase,
   );
