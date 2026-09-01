@@ -1,0 +1,24 @@
+{
+  // Extiende el tsconfig de la raíz para heredar strict, target y libs: el MCP
+  // compila los MISMOS archivos de services/ y lib/ai/ que la web, así que no
+  // puede aflojar las reglas con las que se escribieron.
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    // Decisión 7: el alias sigue siendo `@/*`, pero desde mcp/ apunta un nivel
+    // arriba (mcp/tsconfig.json → ../* = la raíz del proyecto Next). Así
+    // `@/services/...`, `@/lib/ai/...` y `@/types/database` resuelven igual
+    // que en la web sin reescribir un solo import.
+    "paths": {
+      "@/*": ["../*"]
+    },
+    // Proceso Node puro: ni JSX ni el plugin de Next tienen sentido aquí.
+    "jsx": "react-jsx",
+    "plugins": [],
+    "types": ["node"],
+    "noEmit": true,
+    "incremental": true,
+    "tsBuildInfoFile": "./tsconfig.tsbuildinfo"
+  },
+  "include": ["src/**/*.ts", "tsup.config.ts"],
+  "exclude": ["node_modules", "dist"]
+}
