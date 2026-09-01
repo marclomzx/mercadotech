@@ -1,11 +1,9 @@
 import { z } from "zod";
 
-import * as reviewService from "@/services/review.service";
-
 import { createContext } from "../context.js";
 import { defineTool } from "../lib/define-tool.js";
 import { jsonResult } from "../lib/tool-result.js";
-import { getProductsByIds } from "../shared/products.js";
+import { compareProducts } from "../shared/products.js";
 
 export const compareProductsTool = defineTool({
   name: "compare_products",
@@ -32,28 +30,13 @@ export const compareProductsTool = defineTool({
   handler: async (input) => {
     const { anon } = createContext();
 
-    // getProductsByIds es una DERIVACIÓN de shared/products.ts, no un service:
-    // `product.service.getProductsByIds` no existe en el repo pese a lo que
-    // dice la spec. El porqué y el cómo, documentados en ese archivo.
-    const products = await getProductsByIds(input.productIds, anon);
-
-    const ratings = await Promise.all(
-      products.map((product) => reviewService.getAverage(product.id, anon)),
-    );
-
-    const comparativa = products.map((product, index) => ({
-      id: product.id,
-      titulo: product.title,
-      marca: product.brand,
-      precio: product.price,
-      moneda: "PEN",
-      condicion: product.condition,
-      stock: product.stock,
-      disponible: product.stock > 0,
-      rating_promedio: ratings[index].count > 0 ? ratings[index].average : null,
-      total_resenas: ratings[index].count,
-      descripcion: product.description,
-    }));
+    // compareProducts es una DERIVACIÓN de shared/products.ts (compone
+    // getProductsByIds + review.getAverage): la comparte, desde la Fase 5.4,
+    // el prompt comparar_productos, para que ambos caminos devuelvan
+    // exactamente la misma tabla. getProductsByIds en sí es otra derivación
+    // (`product.service.getProductsByIds` no existe pese a lo que dice la
+    // spec) — el porqué y el cómo, documentados en ese archivo.
+    const comparativa = await compareProducts(input.productIds, anon);
 
     // Los dos "ganadores" son lecturas del mismo arreglo, no criterios nuevos:
     // el más barato y el mejor valorado. Cualquier otra recomendación es

@@ -58,6 +58,33 @@ export async function getProductsByIds(
   return found as Product[];
 }
 
+/**
+ * Todos los productos activos, en forma de resumen.
+ *
+ * DERIVACIÓN mínima: pagina sobre `productService.listActiveProducts` (la
+ * misma que usa `search_products`) hasta agotar el total — el service solo
+ * expone una página por llamada (`PRODUCTS_PAGE_SIZE`), y tanto el resource
+ * `mercadotech://products` como el callback `list` de
+ * `mercadotech://products/{id}` necesitan el catálogo completo, no una
+ * página. Con los 14 productos activos del seed son 2 llamadas.
+ */
+export async function listAllActiveProductSummaries(
+  supabase: Client,
+): Promise<ReturnType<typeof toProductSummary>[]> {
+  const summaries: ReturnType<typeof toProductSummary>[] = [];
+
+  // Tope de 50 páginas como salvaguarda ante un total mal calculado; con el
+  // seed real esto corta en la segunda vuelta (`items.length === 0`).
+  for (let page = 1; page <= 50; page += 1) {
+    const { items, total } = await productService.listActiveProducts({ page }, supabase);
+    if (items.length === 0) break;
+    summaries.push(...items.map(toProductSummary));
+    if (summaries.length >= total) break;
+  }
+
+  return summaries;
+}
+
 /** Vista compacta de un producto: lo que se muestra en un listado. */
 export function toProductSummary(product: Product) {
   return {
@@ -73,6 +100,52 @@ export function toProductSummary(product: Product) {
     total_resenas: product.review_count,
     imagen_url: product.image_url,
   };
+}
+
+/**
+ * Comparativa estructurada de 2-4 productos: compone `getProductsByIds` +
+ * `review.getAverage`, los mismos dos pasos que ya hacía la tool
+ * `compare_products` (Fase 5.3) escritos inline. Se sube a `shared/` en la
+ * 5.4 porque el prompt `comparar_productos` necesita EXACTAMENTE la misma
+ * tabla — subir la lógica evita que tool y prompt calculen el mismo dato dos
+ * veces con dos formas ligeramente distintas.
+ */
+export async function compareProducts(
+  ids: string[],
+  supabase: Client,
+): Promise<
+  Array<{
+    id: string;
+    titulo: string;
+    marca: string | null;
+    precio: number;
+    moneda: string;
+    condicion: string;
+    stock: number;
+    disponible: boolean;
+    rating_promedio: number | null;
+    total_resenas: number;
+    descripcion: string | null;
+  }>
+> {
+  const products = await getProductsByIds(ids, supabase);
+  const ratings = await Promise.all(
+    products.map((product) => reviewService.getAverage(product.id, supabase)),
+  );
+
+  return products.map((product, index) => ({
+    id: product.id,
+    titulo: product.title,
+    marca: product.brand,
+    precio: product.price,
+    moneda: "PEN",
+    condicion: product.condition,
+    stock: product.stock,
+    disponible: product.stock > 0,
+    rating_promedio: ratings[index].count > 0 ? ratings[index].average : null,
+    total_resenas: ratings[index].count,
+    descripcion: product.description,
+  }));
 }
 
 /**

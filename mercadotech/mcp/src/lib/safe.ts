@@ -1,4 +1,4 @@
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import type { CallToolResult, ReadResourceResult } from "@modelcontextprotocol/sdk/types.js";
 
 import { describeError } from "./errors.js";
 import { errorResult } from "./tool-result.js";
@@ -44,6 +44,31 @@ export async function safeValue<T>(
   } catch (error) {
     logFailure(label, error);
     return fallback;
+  }
+}
+
+/**
+ * Envuelve el `read` de UN resource (fijo o instancia de un template).
+ *
+ * Distinto de `safeTool`: `ReadResourceResult` no tiene un campo `isError`
+ * como `CallToolResult`, así que un fallo capturado no puede "marcarse" —
+ * se devuelve como contenido de texto legible en el mismo `uri` que se pidió.
+ * Esto es lo que hace que un `resources/read` sobre una fuente caída
+ * degrade (lección 7) en vez de propagar el error crudo por el transporte.
+ */
+export async function safeResource(
+  label: string,
+  uri: string,
+  handler: () => Promise<ReadResourceResult> | ReadResourceResult,
+): Promise<ReadResourceResult> {
+  try {
+    return await handler();
+  } catch (error) {
+    logFailure(label, error);
+    const { kind, message } = describeError(error);
+    return {
+      contents: [{ uri, mimeType: "text/plain", text: `[${kind}] ${message}` }],
+    };
   }
 }
 
