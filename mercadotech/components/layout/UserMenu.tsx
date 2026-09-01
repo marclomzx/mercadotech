@@ -53,6 +53,10 @@ export function UserMenu({ user, onLogout }: UserMenuProps) {
       <DropdownMenuContent align="end">
         <DropdownMenuItem render={<Link href="/pedidos" />}>Mis pedidos</DropdownMenuItem>
         <DropdownMenuItem render={<Link href="/favoritos" />}>Favoritos</DropdownMenuItem>
+        {/* Omitidas a propósito en la sesión 3 (todavía no existían estas
+            rutas) — decisión 3 de la Fase 4.7. */}
+        <DropdownMenuItem render={<Link href="/asistente" />}>Asistente</DropdownMenuItem>
+        <DropdownMenuItem render={<Link href="/soporte" />}>Soporte</DropdownMenuItem>
         {canSell && (
           <DropdownMenuItem render={<Link href="/vendedor/productos" />}>
             Panel vendedor

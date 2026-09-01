@@ -47,7 +47,17 @@ export async function updateSession(request: NextRequest) {
   // activos a anon). Las acciones internas del detalle (preguntar, favorito,
   // agregar al carrito) piden sesión al hacer CLIC, no al entrar — proteger
   // /producto rompería los enlaces compartibles y el SEO.
-  const PROTECTED_PREFIXES = ["/carrito", "/pedidos", "/favoritos", "/vendedor"];
+  // /asistente y /soporte se suman en la Fase 4.7 (decisión 1 de la sesión
+  // 4: la IA exige sesión iniciada, también protege la cuota gratuita del
+  // proveedor).
+  const PROTECTED_PREFIXES = [
+    "/carrito",
+    "/pedidos",
+    "/favoritos",
+    "/vendedor",
+    "/asistente",
+    "/soporte",
+  ];
 
   const { pathname } = request.nextUrl;
   const needsSession = PROTECTED_PREFIXES.some(

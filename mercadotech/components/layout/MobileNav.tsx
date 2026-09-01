@@ -19,6 +19,10 @@ const STATIC_LINKS = [
   { href: "/favoritos", label: "Favoritos" },
   { href: "/carrito", label: "Carrito" },
   { href: "/pedidos", label: "Mis pedidos" },
+  // Omitidas a propósito en la sesión 3 (todavía no existían estas rutas) —
+  // decisión 3 de la Fase 4.7.
+  { href: "/asistente", label: "Asistente" },
+  { href: "/soporte", label: "Soporte" },
 ];
 
 // Mismos enlaces que el Navbar de escritorio, dentro de un sheet para < md.
