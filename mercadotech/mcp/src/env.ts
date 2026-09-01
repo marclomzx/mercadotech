@@ -18,15 +18,27 @@ import { fileURLToPath } from "node:url";
  * módulo hacia arriba.
  */
 
-/** Variables sin las cuales el servidor no puede atender ni una sola tool. */
+/** Variables sin las cuales el servidor no puede atender NI UNA sola tool. */
 const REQUIRED = [
   "NEXT_PUBLIC_SUPABASE_URL",
   "NEXT_PUBLIC_SUPABASE_ANON_KEY",
   "SUPABASE_SERVICE_ROLE_KEY",
-  // Lo consumen lib/ai/embeddings.ts y lib/ai/completion.ts, de los que
-  // dependen las tools semánticas y el asistente (Fase 5.3).
-  "HUGGINGFACEHUB_API_TOKEN",
 ] as const;
+
+/**
+ * Variables que habilitan PARTE del servidor. Su ausencia se avisa por stderr
+ * pero NO impide arrancar.
+ *
+ * `HUGGINGFACEHUB_API_TOKEN` lo consumen `lib/ai/embeddings.ts` y
+ * `lib/ai/completion.ts`, de los que dependen 4 de las 10 tools
+ * (semantic_search_products, ask_assistant, find_related_products,
+ * summarize_reviews). Sin él, esas cuatro devuelven el error accionable de
+ * `lib/ai/` como error de tool y las otras seis siguen funcionando con
+ * normalidad — que es exactamente la degradación que pide la Fase 5.3. Si
+ * fuera obligatorio aquí, la falta de un token de IA tumbaría también la
+ * búsqueda por texto y la consulta de pedidos, que no tienen nada que ver.
+ */
+const OPTIONAL = ["HUGGINGFACEHUB_API_TOKEN"] as const;
 
 /** Sube desde `mcp/src/` (o `mcp/dist/`) buscando la `.env.local` de la raíz. */
 function findEnvLocal(): string | null {
@@ -76,6 +88,17 @@ export function loadEnvLocal(): void {
     throw new Error(
       `Faltan variables en ${path}: ${missing.join(", ")}. ` +
         "El servidor MCP no puede arrancar sin ellas (ver .env.example).",
+    );
+  }
+
+  const degraded = OPTIONAL.filter((name) => !process.env[name]);
+  if (degraded.length > 0) {
+    // Por stderr, nunca por stdout (ver src/lib/stdout-guard.ts).
+    console.error(
+      `[mercadotech-mcp] ${degraded.join(", ")} no está configurada en ${path}: ` +
+        "las tools que usan IA (semantic_search_products, ask_assistant, " +
+        "find_related_products, summarize_reviews) devolverán error; el resto " +
+        "del servidor funciona con normalidad.",
     );
   }
 }

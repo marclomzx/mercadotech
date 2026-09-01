@@ -44,6 +44,27 @@ export const providerDown = (provider: string, cause?: unknown) =>
   );
 
 /**
+ * ¿El mensaje viene del proveedor de IA?
+ *
+ * HEURÍSTICA POR MENSAJE, y a propósito. Los errores de `lib/ai/` son
+ * `Error` normales (esa capa es del proyecto web y no conoce a `McpToolError`),
+ * y en dos de las cuatro tools de IA la llamada al proveedor está ENTERRADA
+ * dentro de un service que además consulta Supabase: `chat.service.ask` y
+ * `vector-search.searchProducts` mezclan embedding y base de datos en la misma
+ * llamada, así que envolver la llamada entera etiquetaría como "proveedor
+ * caído" un fallo de Postgres.
+ *
+ * Mirar el mensaje es lo único que distingue una causa de la otra sin tocar
+ * `lib/ai/`. Solo afecta a la ETIQUETA (`kind`): el texto accionable que
+ * escribió `lib/ai/` llega al modelo intacto en los dos casos.
+ */
+function looksLikeAiProviderFailure(message: string): boolean {
+  return /hugging\s?face|HUGGINGFACEHUB_API_TOKEN|HUGGINGFACE_(CHAT|EMBEDDING)_MODEL/i.test(
+    message,
+  );
+}
+
+/**
  * Normaliza cualquier cosa lanzada (Error, error de PostgREST, string, objeto
  * suelto) a un `{kind, message}` presentable. Es el único punto donde un error
  * ajeno se convierte en texto para el modelo.
@@ -56,7 +77,10 @@ export function describeError(error: unknown): {
     return { kind: error.kind, message: error.message };
   }
   if (error instanceof Error) {
-    return { kind: "internal", message: error.message };
+    return {
+      kind: looksLikeAiProviderFailure(error.message) ? "provider_down" : "internal",
+      message: error.message,
+    };
   }
   // PostgREST propaga objetos planos con `message`; los services los dejan
   // pasar tal cual (convención del proyecto), así que llegan hasta aquí.

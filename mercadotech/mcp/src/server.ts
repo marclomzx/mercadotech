@@ -3,8 +3,9 @@ import {
   ListPromptsRequestSchema,
   ListResourceTemplatesRequestSchema,
   ListResourcesRequestSchema,
-  ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
+
+import { registerTools } from "./tools/index.js";
 
 /** Se mantiene a mano en sincronía con `mcp/package.json`. */
 const SERVER_VERSION = "0.1.0";
@@ -12,9 +13,8 @@ const SERVER_VERSION = "0.1.0";
 /**
  * Construye el servidor MCP de MercadoTech.
  *
- * En la Fase 5.2 arranca VACÍO a propósito: declara sus tres capabilities y
- * responde a los tres listados con listas vacías. Las tools llegan en la 5.3;
- * los resources y prompts, en la 5.4.
+ * Fase 5.3: las 10 tools de solo lectura ya están registradas. Los resources
+ * y prompts llegan en la 5.4 — hasta entonces responden con listas vacías.
  */
 export function createServer(): McpServer {
   const server = new McpServer(
@@ -34,25 +34,27 @@ export function createServer(): McpServer {
     },
   );
 
+  registerTools(server);
   registerEmptyListings(server);
 
   return server;
 }
 
 /**
- * Handlers provisionales de los tres listados, para que el servidor vacío
- * responda `[]` en vez de `Method not found`.
+ * Handlers provisionales de los listados que TODAVÍA no tienen contenido, para
+ * que respondan `[]` en vez de `Method not found`.
  *
- * ⚠️ BORRAR EN LAS FASES 5.3 / 5.4. `McpServer.registerTool()` llama a
- * `assertCanSetRequestHandler("tools/list")` y LANZA si ya hay un handler
- * puesto a mano; lo mismo vale para `registerResource` y `registerPrompt` con
- * sus métodos. En cuanto exista la primera tool, esta función sobra: el propio
- * `McpServer` instala los listados reales.
+ * El de `tools/list` ya se fue en esta fase: lo instala `McpServer` al
+ * registrar la primera tool. Los otros dos se van en la 5.4 por la misma razón.
+ *
+ * ⚠️ BORRAR EN LA FASE 5.4. `McpServer.registerResource()` llama a
+ * `assertCanSetRequestHandler("resources/list")` y LANZA si ya hay un handler
+ * puesto a mano; lo mismo vale para `registerPrompt`. Se registran DESPUÉS de
+ * `registerTools` por el mismo motivo, en orden.
  */
 function registerEmptyListings(server: McpServer): void {
   const low = server.server;
 
-  low.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [] }));
   low.setRequestHandler(ListResourcesRequestSchema, async () => ({ resources: [] }));
   low.setRequestHandler(ListResourceTemplatesRequestSchema, async () => ({
     resourceTemplates: [],
