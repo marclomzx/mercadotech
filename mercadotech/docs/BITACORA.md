@@ -76,6 +76,17 @@ afinados para navegador/Route Handler/middleware, no para un proceso stdio
 sin sesión ni cookies — mismo criterio que ya había resuelto
 `scripts/index-all.ts`.
 
+**Decisión — el alias `@/*` sigue resolviendo hacia la raíz, sin
+reescribirlo:** `mcp/tsconfig.json` extiende el `tsconfig.json` de la raíz y
+solo redeclara `@/*` → `../*`, así que `@/services/...` y `@/lib/ai/...`
+resuelven exactamente igual que en la web. La contrapartida es operativa, no
+de código: el servidor tiene que lanzarse `npx tsx mcp/src/index.ts` **desde
+la raíz** (`mercadotech/`), nunca desde dentro de `mcp/` — un cwd
+equivocado revienta con `Cannot find module '@/services/…'` (documentado en
+la tabla de síntomas de `mcp/README.md`). El build de `tsup` (Fase 5.5) lee
+ese mismo `tsconfig.json` para bundlear los archivos del alias en
+`dist/index.js`, sin un segundo mapeo que se pudiera desincronizar.
+
 ### Fase 5.3 — 10 tools MCP de solo lectura (commit `95f5658`)
 
 **Construido:** `search_products`, `get_product`, `list_categories`,
@@ -185,6 +196,23 @@ también desde el servidor MCP.
 sin hallazgos críticos pendientes, `lint`/`type-check`/`build` en verde en
 la raíz y en `mcp/`. `npm run test` sigue `N/A` (sesión 6, el script no
 existe todavía).
+
+### Desviaciones de la spec confirmadas contra el repo (gana el código)
+
+La especificación de la sesión 5 (`MercadoTech_sesion5.md`) da por ciertos
+algunos datos de ejemplo que no coinciden con el seed real. Se documentan
+aquí en vez de "corregir" el seed o inventar coincidencias:
+
+- **`product.service.getProductsByIds` no existe** (la spec lo da por hecho
+  en su tabla "Estado de partida") — se derivó en `shared/products.ts`
+  componiendo `getProductById` (Fase 5.3).
+- **El vendedor de ejemplo real es "ElectroMax Perú"**, no "TecnoStore
+  Perú" como dice el texto de verificación de la Fase 5.4 —
+  `mercadotech://sellers/{id de seller1}` se probó y documentó con el
+  vendedor real del seed.
+- **El pedido `c0000000-…01` está `pendiente`, no `entregado`** como dice el
+  texto de verificación de la Fase 5.3 — `get_order_status` se probó con
+  `c0000000-…05`, que sí es el pedido `entregado` con 2 ítems del seed.
 
 ---
 

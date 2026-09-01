@@ -29,6 +29,14 @@ supabase start          # levanta Supabase local (Postgres, Auth, Storage)
 supabase db reset        # reconstruye la BD desde migrations/ + seed.sql
 ```
 
+Servidor MCP (sesión 5, `mcp/` — ver `mcp/README.md`):
+
+```bash
+npx tsx mcp/src/index.ts   # dev, SIEMPRE desde la raíz (alias @/* lo exige)
+cd mcp && npm run build     # build de producción → mcp/dist/index.js
+npx @modelcontextprotocol/inspector npx tsx mcp/src/index.ts   # Inspector
+```
+
 ## Separación por capas (regla número uno del proyecto)
 
 ```
@@ -52,6 +60,11 @@ types/              Tipos de dominio + database.ts (generado, no editar a mano).
 app/api/v1/         Route Handlers delgados: reindex, search/semantic, chat —
                     todo lo que no puede correr en el navegador (token de IA,
                     service role, cookies).
+mcp/                Servidor MCP de solo lectura (sesión 5), proceso Node aparte
+                    de la web: SOLO importa services/, lib/ai/, lib/constants/ y
+                    types/ — jamás app/, components/ ni hooks/. Sus clientes de
+                    Supabase se crean en mcp/src/context.ts, nunca en
+                    lib/supabase/admin.ts (server-only revienta bajo Node puro).
 ```
 
 Reglas derivadas: un archivo, una responsabilidad; sin barrels; la UI nunca
@@ -86,14 +99,26 @@ colocados en `app/` (`ShopNavbar.tsx`, `SellerGuard.tsx`, `CatalogView.tsx`,
   hook → fetch a `app/api/v1/*` → service → `lib/ai/` (el token de Hugging
   Face y el cliente admin no pueden viajar al navegador).
 
-## Verificación de capas (los cuatro deben devolver vacío)
+## Verificación de capas (los cinco deben devolver vacío)
 
 ```bash
 grep -rl "@/lib/supabase" components hooks
 grep -rl "from \"@/services" components
 grep -rln "@huggingface" --include="*.ts" . | grep -v node_modules | grep -v lib/ai
 grep -rl "lib/supabase/admin" app components hooks services | grep -v "api/v1"
+grep -rlE "from \"@/(app|components|hooks)" mcp/src
 ```
+
+## Skills de gobernanza (`.claude/skills/`, sesión 5)
+
+4 Skills que Claude Code carga solo cuando la petición coincide con su
+`description`: `mercadotech-architecture-enforcer` (gate PREVIO a crear o
+mover un archivo — ¿va aquí, con estas dependencias?),
+`mercadotech-code-reviewer` (informe /10 sobre código YA escrito),
+`mercadotech-tech-lead` (scorecard ponderado de diseño y deuda técnica) y
+`mercadotech-automatic-validator` (veredicto binario APROBADA/FALLIDA sobre
+una checklist fija). Las cuatro REPORTAN; ninguna edita código — la
+corrección siempre es un paso aparte y humano-supervisado.
 
 ## Mapa de rutas
 
