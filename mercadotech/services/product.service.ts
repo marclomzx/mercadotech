@@ -16,7 +16,10 @@ const PRODUCT_IMAGES_BUCKET = "product-images";
 // product_images/reviews embebidos solo para calcular la portada y el
 // promedio — el select trae exactamente lo que mapProductRow necesita, nada
 // más (evita pedirle a Postgres columnas que no se van a usar).
-const PRODUCT_SELECT =
+// Exportado para que vector-search.service.ts (Fase 4.4) hidrate los
+// resultados de la búsqueda semántica con las mismas columnas/joins que el
+// catálogo normal — un solo lugar define qué trae un Product completo.
+export const PRODUCT_SELECT =
   "*, product_images(image_path, position), reviews(rating)";
 
 export type ProductQueryRow = Database["public"]["Tables"]["products"]["Row"] & {

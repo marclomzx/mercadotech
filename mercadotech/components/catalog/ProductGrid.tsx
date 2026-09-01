@@ -11,6 +11,10 @@ type ProductGridProps = {
   emptyTitle?: string;
   emptyDescription?: string;
   emptyAction?: ReactNode;
+  // Opcional: id de producto → similitud (0–1). Solo lo usa la pestaña
+  // "Resultados con IA" para el badge de coincidencia — el resto de usos no
+  // lo pasa y ProductCard se renderiza exactamente igual que siempre.
+  similarities?: Record<string, number>;
 };
 
 // Suficientes para llenar 3 filas en desktop (4 columnas) sin que el
@@ -35,6 +39,7 @@ export function ProductGrid({
   emptyTitle = "No encontramos productos",
   emptyDescription = "Prueba ajustando los filtros o la búsqueda.",
   emptyAction,
+  similarities,
 }: ProductGridProps) {
   if (loading) {
     return (
@@ -53,7 +58,7 @@ export function ProductGrid({
   return (
     <div className={GRID_CLASSES}>
       {products.map((product) => (
-        <ProductCard key={product.id} product={product} />
+        <ProductCard key={product.id} product={product} similarity={similarities?.[product.id]} />
       ))}
     </div>
   );

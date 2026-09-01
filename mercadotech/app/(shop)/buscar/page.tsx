@@ -2,14 +2,14 @@ import { Suspense } from "react";
 
 import { LoadingState } from "@/components/shared/LoadingState";
 
-import { CatalogView } from "../CatalogView";
+import { BuscarView } from "./BuscarView";
 
 type BuscarPageProps = {
   searchParams: Promise<{ q?: string }>;
 };
 
 // El título se arma server-side con el `q` de la URL; el filtrado real lo
-// hace CatalogView (cliente) leyendo el mismo `q` con su propio
+// hace BuscarView (cliente) leyendo el mismo `q` con su propio
 // useSearchParams — ambos apuntan a la misma URL, no hay dos fuentes.
 export default async function BuscarPage({ searchParams }: BuscarPageProps) {
   const { q } = await searchParams;
@@ -17,7 +17,7 @@ export default async function BuscarPage({ searchParams }: BuscarPageProps) {
 
   return (
     <Suspense fallback={<LoadingState lines={6} />}>
-      <CatalogView title={title} />
+      <BuscarView title={title} />
     </Suspense>
   );
 }

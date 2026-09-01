@@ -13,10 +13,10 @@ type SearchBarProps = {
   className?: string;
 };
 
-// La búsqueda semántica (toggle IA) llega en la sesión 4 — por ahora es
-// búsqueda por texto simple. El componente solo expone onSearch(query); a
-// quién navega con ese valor lo decide quien lo use (conectado a /buscar?q=
-// recién en la Fase 3.4, junto con useCategories).
+// El componente solo expone onSearch(query); a quién navega con ese valor lo
+// decide quien lo use (conectado a /buscar?q= en la Fase 3.4, junto con
+// useCategories). La pestaña "Resultados con IA" de /buscar (Fase 4.4) lee
+// el mismo ?q= — este componente no sabe nada de eso.
 //
 // onSearch es opcional y el default vive ACÁ (Client Component), no en quien
 // lo renderiza: un layout Server Component no puede pasar una función nueva
