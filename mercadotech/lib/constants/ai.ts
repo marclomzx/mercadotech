@@ -44,10 +44,16 @@ export const VECTOR_SEARCH_DEFAULT_TOP_K = 5;
 export const VECTOR_SEARCH_MAX_TOP_K = 20;
 
 // Similitud mínima para considerar relevante una ficha.
-// PROVISIONAL: se calibra con datos reales en la Fase 4.8. El punto de
-// partida es 0.3 porque dos textos SIN relación ya rondan 0.1–0.2 solo por
-// compartir idioma, mientras que los relacionados suelen pasar de 0.4.
-// Muy alto = no encuentra nada; muy bajo = mete ruido en el contexto.
+// CALIBRADO en la Fase 4.8 con 8 consultas reales (docs/RAG.md): se queda
+// en 0.3, pero NO porque sea el número ideal — los datos muestran que
+// ningún threshold separa limpiamente señal de ruido en este catálogo. El
+// mejor resultado real de una consulta legítima ("audífonos para
+// gimnasio", 0.3798) puntúa MÁS BAJO que el peor ruido de una consulta
+// irrelevante ("autos usados", 0.4058): subir el umbral lo suficiente para
+// filtrar ese ruido también mataría el caso insignia de la búsqueda
+// semántica. Es un límite de all-MiniLM-L6-v2 (modelo chico, español
+// débil) sobre un catálogo temáticamente homogéneo, no un problema de
+// calibración — moverlo cambia qué caso falla, no si alguno falla.
 export const VECTOR_SEARCH_DEFAULT_SIMILARITY_THRESHOLD = 0.3;
 
 // ============================================================
@@ -61,6 +67,10 @@ export const CONTEXT_BUILDER_DEFAULT_MAX_SOURCES = 5;
 // El constructor vuelve a filtrar por similitud aunque la búsqueda ya lo
 // hizo: puede recibir resultados de otra fuente o con otro umbral, y no debe
 // confiar en que vengan filtrados.
+//
+// Mismo valor y mismo diagnóstico que VECTOR_SEARCH_DEFAULT_SIMILARITY_
+// THRESHOLD (ver ese comentario y docs/RAG.md): calibrado en la Fase 4.8,
+// se queda en 0.3 porque subirlo no separa señal de ruido en este catálogo.
 export const CONTEXT_BUILDER_DEFAULT_MIN_SIMILARITY = 0.3;
 
 // Una ficha con menos de 20 caracteres de contenido no aporta nada al modelo
