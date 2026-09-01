@@ -76,7 +76,9 @@ export async function POST(request: Request) {
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Error desconocido al responder la consulta.";
-    console.error(`[chat] mode=${mode} "${query}": ${message}`);
+    // Sin el texto de la consulta: mismo criterio que el log de éxito de
+    // arriba, que tampoco lo incluye.
+    console.error(`[chat] mode=${mode}: ${message}`);
     // 502: igual que los otros dos endpoints, el fallo casi siempre viene del
     // proveedor externo (token, modelo rotado, cuota). El mensaje de lib/ai ya
     // es accionable y se propaga tal cual.
