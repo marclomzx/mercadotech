@@ -20,6 +20,292 @@ fuera a propósito.
 
 ---
 
+## Sesión 4 — IA integrada con RAG (2026-08-31)
+
+**Alcance:** búsqueda semántica sobre pgvector, y dos asistentes
+conversacionales (asesor de compras y soporte) que responden EXCLUSIVAMENTE
+con el conocimiento indexado de la plataforma, citando sus fuentes. 55
+archivos, +3701 líneas (`git diff --stat dfef469..HEAD`, `dfef469` es el
+cierre de la sesión 3).
+
+> Mismo aviso que la sesión 3: los 9 commits de esta sesión se crearon
+> todos el 2026-08-31, en el orden real de las fases — pero sin la
+> cronología de días que tendría una sesión ejecutada a lo largo del
+> tiempo real.
+
+### Prompt 0 — Provisión y smoke test (commit `308ecf6`)
+
+**Construido:** verificación de que la sesión 3 estaba completa (`npm run
+build` limpio), stack Supabase local, token de Hugging Face confirmado en
+`.env.local`, 3 variables nuevas en `.env.example` sin valores
+(`HUGGINGFACEHUB_API_TOKEN`, `HUGGINGFACE_EMBEDDING_MODEL`,
+`HUGGINGFACE_CHAT_MODEL`), dependencias `@huggingface/inference` y `tsx`.
+
+**Smoke test contra la API real, antes de escribir código:** embeddings vía
+SDK devolvieron un vector de 384 dimensiones; para el chat se probaron 5
+modelos candidatos contra el router — solo `meta-llama/Llama-3.1-8B-Instruct`
+(el de la spec) respondió; `Qwen2.5-7B-Instruct`, `Llama-3.2-3B-Instruct` y
+`SmolLM3-3B` dieron "not supported by any provider", `Mistral-7B-Instruct-v0.3`
+dio "is not a chat model". **El modelo NO rotó** — se pudo seguir con el
+elegido por la spec, sin buscar reemplazo.
+
+### Fase 4.1 — Infraestructura vectorial (commit `94cd36c`)
+
+**Construido:** 4 migraciones nuevas (`enable_pgvector`,
+`create_knowledge_embeddings`, `create_match_knowledge`,
+`knowledge_embeddings_rls`), tabla `knowledge_embeddings` con índice HNSW,
+RPC `match_knowledge`, `types/database.ts` regenerado.
+
+**Decisión — una tabla discriminada por `source_type`, no dos gemelas:**
+productos y artículos tienen la misma forma (texto + vector + metadata) y
+se consultan juntos; `match_knowledge` con `p_source_type` null busca en
+ambas fuentes de una sola pasada del índice. Agregar una fuente futura
+(reseñas, por ejemplo) es un valor más en el `check`, no una tabla nueva.
+
+**Decisión — `source_id` sin foreign key:** apunta a dos tablas origen
+distintas (`products` o `support_articles`) según `source_type`, y Postgres
+no admite una FK condicional. Consecuencia asumida: al borrar una fuente
+queda una ficha huérfana — la limpia el reindexado (Fase 4.3) o
+`index-all`, nunca de forma inmediata.
+
+**Decisión — RPC `SECURITY INVOKER`, no `DEFINER`:** al revés que
+`create_order_from_cart` (que debía saltarse la RLS para escribir
+`orders`), `match_knowledge` solo lee y necesita respetar la visibilidad
+del caller — con `DEFINER` sería un agujero que sortea la política de la
+decisión 1 (la IA exige sesión) para cualquiera que invoque la función.
+
+**Verificado:** `match_knowledge` con un vector de 384 ceros → 0 filas sin
+error; con fichas de prueba reales, ordenó por similitud, el threshold
+filtró correctamente y `p_source_type` discriminó por fuente. Privilegios
+confirmados contra la base real: `anon` sin ningún acceso, `authenticated`
+solo `SELECT`.
+
+### Fase 4.2 — Capa de IA y servicio de embeddings (commit `b23d3c7`)
+
+**Construido:** `lib/constants/ai.ts` (14 tunables, cada uno con su
+porqué), `lib/ai/{embeddings,completion,prompts}.ts`,
+`services/embedding.service.ts`.
+
+**Decisión — SDK para embeddings, `fetch` para chat:** el router
+OpenAI-compatible de Hugging Face no implementa la tarea
+`feature-extraction`; un `fetch` directo para vectorizar falla. Para chat
+el router SÍ es el camino soportado y su contrato es un JSON trivial, así
+que un SDK ahí sería una dependencia innecesaria.
+
+**Decisión — modelo de chat por variable de entorno:** el nivel gratuito de
+Hugging Face retira modelos sin aviso (confirmado en el Prompt 0, aunque no
+pasó esta vez); `HUGGINGFACE_CHAT_MODEL` permite cambiar de modelo sin
+tocar código.
+
+**Verificado con script de humo real** (scratchpad, no en el repo):
+embedding de 384 dimensiones; completion citando con `[1]` cuando el
+contexto sí tenía coincidencia, y negándose a inventar cuando no la tenía;
+mensajes de error diferenciados (401 / modelo no disponible / respuesta
+inválida) al quitar el token, restaurado después.
+
+### Fase 4.3 — Indexación automática (commit `1f71b1d`)
+
+**Construido:** `lib/api-response.ts`, `app/api/v1/reindex/route.ts`
+(primer Route Handler del proyecto), `services/indexing-trigger.service.ts`
+(fire-and-forget), `scripts/index-all.ts`; `useProductForm` y
+`useSellerProducts` ampliados para disparar el reindexado.
+
+**Problema:** Node 20 no expone `WebSocket` global (llegó recién en Node
+22) y `supabase-js` lanza al construir el cliente admin aunque el script
+solo use REST. Se resolvió con un stub de `WebSocket` dentro de
+`scripts/index-all.ts` en vez de exigir Node 22 o sumar la dependencia
+`ws`.
+
+**Verificado:** `index-all` → 14 productos + 10 artículos = 24 fichas;
+publicar por la UI → fila 25; editar el título → sigue en 25 (upsert, no
+duplicado) con el `content` actualizado; publicar con el token renombrado →
+la publicación se completa igual, con solo un `console.warn` en el
+servidor — el vendedor no se entera.
+
+### Fase 4.4 — Búsqueda semántica en el catálogo (commit `b178f77`)
+
+**Construido:** `services/vector-search.service.ts`,
+`app/api/v1/search/semantic/route.ts`, `hooks/useSemanticSearch.ts`,
+pestaña "Resultados con IA" en `/buscar`, badge de similitud opcional en
+`ProductCard`/`ProductGrid`.
+
+**Decisión — la IA exige sesión (decisión 1 de la spec):** la RLS de
+`knowledge_embeddings` ya solo deja leer a `authenticated`; la pestaña IA
+muestra el aviso de login a los anónimos en vez de una pestaña
+silenciosamente vacía, y de paso protege la cuota gratuita del proveedor.
+
+**Problema encontrado y corregido:** `useAuth` importaba
+`@/lib/supabase` directamente (violación de capas, detectable con el grep
+de la sesión 3). Se movió `onAuthStateChange` a `auth.service.ts`.
+
+**Problema de entorno (no de código):** el panel del navegador de pruebas
+corre oculto por defecto, lo que colapsa los `rect` de layout a `0×0` y
+rompe el clic sobre los `Tabs` de base-ui (dependen de geometría real).
+Forzar una captura de pantalla antes de cada clic pinta el panel y lo
+resuelve.
+
+**Hallazgo honesto, sin maquillar:** con la consulta *"audífonos **para
+el** gimnasio"* (con el artículo "el"), el producto de audio **no** quedó
+primero — una silla gamer ganó (0.4195 vs 0.3950). Con la redacción exacta
+de la Fase 4.8 ("audífonos para gimnasio", sin "el") sí funciona. Quedó
+documentado como una sensibilidad real del modelo a la redacción, no
+oculto.
+
+### Fase 4.5 — Constructor de contexto (commit `038dc0b`)
+
+**Construido:** `lib/ai/context-builder.ts` — función pura, cero I/O.
+
+**Verificado en frío** (sin red, con datos en memoria): lista vacía y
+"todas bajo el threshold" dan `contextTruncated: false` (se filtró por
+relevancia, no por presupuesto — dos señales distintas, adrede no
+confundidas); una fuente gigante se recorta a 8000 caracteres en vez de
+descartarse; una fuente a la que le quedan menos de 200 caracteres de
+presupuesto se descarta ENTERA en vez de cortarse a media frase; empates de
+similitud conservan el orden de entrada. Pureza confirmada de forma
+transitiva: sus dos únicos imports (`lib/ai/prompts`, `lib/constants/ai`)
+no tienen dependencias propias.
+
+### Fase 4.6 — Servicio conversacional y endpoint (commit `809bd3b`)
+
+**Construido:** `types/chat.ts`, `services/chat.service.ts` (`ask`),
+`app/api/v1/chat/route.ts`; se agregó `vector-search.service.searchByQuery`
+(pieza que faltaba para que `chat.service` no tuviera que generar el
+embedding él mismo, lo que lo habría obligado a conocer al proveedor).
+
+**Decisión:** `MODE_CONFIG` es el único lugar de todo el proyecto que sabe
+que existen los modos `compras`/`soporte` — cada modo es solo dos datos
+(`sourceType` + instrucciones de sistema). `chat.service` no importa
+`@huggingface/*`, no arma prompts a mano, no consulta la tabla ni recorta
+contexto: encadena `vector-search` → `context-builder` → `completion`.
+
+**Primera señal del problema que resuelve la Fase 4.8:** la consulta
+`¿venden autos usados?` devolvió `hasRelevantContext: true` (se esperaba
+`false`) — las 5 fichas recuperadas, todas irrelevantes, superaban el
+umbral de 0.3 igual.
+
+### Fase 4.7 — Interfaz del asistente (commit `8f78d70`)
+
+**Construido:** `hooks/useChat.ts`, `hooks/useMyTickets.ts`,
+`services/ticket.service.ts`, `components/chat/*` (puros),
+`TicketStatusBadge`/`TicketCard`, páginas `/asistente` y `/soporte`,
+`UserMenu`/`MobileNav`/middleware ampliados con las dos rutas nuevas.
+
+**Decisión 5 de la spec:** `ticket.service` solo tiene `listMine` —
+crear tickets desde la UI llega con el agente de la sesión 8.
+
+**Desviación de la spec, verificada contra el seed real:** la spec pedía
+comprobar que "`buyer1` ve sus tickets del seed", pero los 2 tickets del
+seed están asignados a `buyer2` y `buyer3` — `buyer1` no tiene ninguno. Se
+verificaron las 3 cuentas: `buyer1` ve el `EmptyState` correcto (no tiene
+tickets), `buyer2` ve "Mi pedido no ha llegado" (En proceso), `buyer3` ve
+su ticket resuelto.
+
+**Verificado:** clic en una fuente de producto abrió el producto correcto;
+con el servidor levantado sin token, el chat mostró
+*"No pude procesar tu consulta, intenta de nuevo."* como un mensaje más de
+la conversación — nunca una pantalla de error — y el resto de la app
+funcionó normal.
+
+### Fase 4.8 — Calibración, observabilidad y casos de prueba (commit `a6f0d69`)
+
+**Construido:** `docs/RAG.md` con los 6 casos, sus transcripciones reales y
+la calibración.
+
+**¿Hubo calibración?** Sí, con datos: 8 consultas reales (las de los casos
++ 2 legítimas extra + 2 absurdas) mostraron que `hasRelevantContext` fue
+`true` en las 8 — incluidas las 3 absurdas — porque el umbral de 0.3 nunca
+filtra nada en este catálogo. Se comprobó matemáticamente que subir el
+umbral no arregla nada: el mejor resultado real de una consulta legítima
+("audífonos para gimnasio", 0.3798) puntúa **más bajo** que el peor
+resultado de ruido de una consulta irrelevante ("autos usados", 0.4058).
+Ningún valor de threshold separa limpiamente ambos casos.
+
+**Decisión: el umbral se queda en 0.3.** No porque sea el ideal, sino
+porque moverlo cambia qué caso falla, no si alguno falla — es un límite de
+`all-MiniLM-L6-v2` (modelo chico, español débil) sobre un catálogo
+temáticamente homogéneo, no un problema de calibración. Se actualizaron los
+comentarios de `VECTOR_SEARCH_DEFAULT_SIMILARITY_THRESHOLD` y
+`CONTEXT_BUILDER_DEFAULT_MIN_SIMILARITY` en `lib/constants/ai.ts`; el valor
+numérico no cambió.
+
+**Resultado real de los 6 casos** (no lo que se esperaba que pasara):
+
+| Caso | Estado |
+|---|---|
+| 1. Indexación automática | ✅ |
+| 2. Recuperación semántica | ✅ (con la redacción exacta del caso) |
+| 3. Respuesta contextual (compras) | ⚠️ cumple "2+ fuentes" en 1 de 2 intentos — no determinismo del modelo |
+| 4. Respuesta contextual (soporte) | ✅ |
+| 5. Sin información | ❌ el modelo no admite la falta de info; respuesta engañosa, causa diagnosticada |
+| 6. Navegación desde fuentes | ✅ (artículo ancla a `/soporte`, limitación ya conocida) |
+
+**Fuera de alcance en toda la sesión** (a propósito, no por omisión):
+streaming de las respuestas, crear tickets desde la UI (sesión 8), el
+agente de voz (sesión 8), persistir el historial de la conversación,
+re-decidir proveedor/modelo/dimensión (Guía HF, decisiones cerradas).
+
+---
+
+### (a) Criterios de aceptación de la sesión
+
+| Criterio | Estado | Evidencia |
+|---|---|---|
+| Los 6 casos de prueba documentados en `docs/RAG.md` | ✅ | Los 6 con transcripción real; 4 pasan, 1 con reserva, 1 falla documentado |
+| Sin token, el resto de la app funciona y la IA da error controlado | ✅ | Catálogo con 12 productos cargados sin token; chat con mensaje inline amable |
+| Anónimo: catálogo y búsqueda exacta intactos; IA pide sesión | ✅ | `/asistente` anónimo → `/login?redirectTo=/asistente`; pestaña IA con aviso; exacta sin cambios |
+| `grep` de `@huggingface` fuera de `lib/ai/` vacío | ✅ | Verificado en cada fase |
+| `grep` de `lib/supabase/admin` fuera de `app/api/v1/` y `scripts/` vacío | ✅ | Admin solo en los 2 lugares permitidos |
+| `lint`, `type-check` y `build` pasan | ✅ | Los tres en verde en cada fase; build final con 20 rutas |
+
+### (b) Deuda técnica y limitaciones vigentes (nuevas de la sesión 4)
+
+1. **Caso 5 falla tal como está escrito.** "¿venden autos usados?" no
+   admite la falta de información — confunde "autos usados" con la
+   condición "usado" de los productos. Diagnosticado en `docs/RAG.md`: no
+   se resuelve moviendo el threshold, requeriría un modelo de embeddings
+   más grande/multilingüe, re-ranking, o búsqueda híbrida — los tres fuera
+   de alcance (modelo cerrado por la Guía HF).
+2. **`hasRelevantContext` no es una señal confiable de relevancia real.**
+   Puede ser `true` con contexto completamente irrelevante (3 de 8
+   consultas de calibración). El síntoma correcto a mirar es la respuesta,
+   no ese booleano solo.
+3. **El caso 3 es no determinista.** La misma consulta a veces cita 1
+   producto, a veces 2+, porque un accesorio (mochila) puntúa más alto que
+   los productos realmente pedidos (laptops).
+4. **Los artículos de FAQ no tienen página propia.** `SourcesList` ancla
+   las fuentes de tipo `articulo_soporte` de vuelta a `/soporte`, no a un
+   detalle del artículo — documentado desde la Fase 4.7.
+5. **Las mini-cards de producto en el chat no tienen imagen real.**
+   `ChatSource.metadata` (lo que se guarda al fichar) no incluye
+   `image_url`; `SourcesList` usa el mismo placeholder que el resto de la
+   app.
+6. **La conversación no persiste.** Vive en memoria del navegador; se
+   pierde al recargar — a propósito, fuera de alcance de esta sesión.
+7. **Sin streaming.** Las respuestas llegan completas, no token a token —
+   a propósito, fuera de alcance.
+
+### (c) Pendientes
+
+**Heredados de sesiones anteriores (sin cambios en esta sesión):**
+
+- **Sesión 1 completa:** sigue sin ejecutarse. Faltan `docs/COSTOS.md` y
+  `docs/PROMPTS.md`.
+- **Fase 2.6:** `supabase/tests/` sigue vacío (solo `.gitkeep`). Faltan los
+  scripts de validación RLS.
+- **Fase 2.7:** sigue sin estar pendiente — `docs/ARQUITECTURA.md` existe.
+
+**Generados en esta sesión, para cuando se retome este flujo:**
+
+- Calibrar el retrieval con un modelo de embeddings mejor o con
+  re-ranking, si el caso 5 (o similares) se vuelve un problema real de
+  producto y no solo de laboratorio.
+- Crear tickets desde la UI y el agente de voz (sesión 8, ya anticipado en
+  el layout de `/soporte`).
+- Página propia por artículo de FAQ, si se necesita navegación más
+  profunda desde las fuentes citadas.
+
+---
+
 ## Sesión 3 — UI inteligente y frontend multimodal (2026-08-30 / 2026-08-31)
 
 **Alcance:** MVP funcional completo del marketplace sobre la infraestructura
