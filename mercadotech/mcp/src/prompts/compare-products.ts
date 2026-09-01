@@ -63,7 +63,12 @@ export const compareProductsPrompt: RegisteredPromptDefinition = definePrompt({
               "preguntas de compradores), usa la tool get_product.",
           ].join("\n"),
         ),
-        embeddedJson("mercadotech://compare", { productos: comparativa }),
+        // URI sintética: NO hay un resource registrado en este id — a
+        // diferencia de describir_producto/resumen_de_resenas, que embeben
+        // mercadotech://products/{id} (ese sí navegable). Prefijo
+        // "ephemeral" a propósito, para no sugerir a un cliente que puede
+        // resolverla luego con resources/read.
+        embeddedJson("mercadotech://ephemeral/compare", { productos: comparativa }),
       ],
     };
   },

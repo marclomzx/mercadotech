@@ -49,7 +49,9 @@ export const draftQuestionAnswerPrompt: RegisteredPromptDefinition = definePromp
               "la tool summarize_reviews antes de afirmar algo sobre eso.",
           ].join("\n"),
         ),
-        embeddedJson(`mercadotech://questions/${questionId}`, question),
+        // URI sintética, mismo criterio que comparar_productos: no existe un
+        // resource mercadotech://questions/{id} registrado en resources/index.ts.
+        embeddedJson(`mercadotech://ephemeral/questions/${questionId}`, question),
       ],
     };
   },
