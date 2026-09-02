@@ -30,7 +30,7 @@ test.describe("vendedor — negativos", () => {
     await expect(kanban.isCardInColumn(SHIPPED_ORDER_ID, "enviado")).toBeVisible();
 
     // Mismo camino de teclado, pero hacia la columna anterior.
-    await kanban.moveOrderBackward(SHIPPED_ORDER_ID);
+    await kanban.moveOrderBackward(SHIPPED_ORDER_ID, "pagado");
 
     // La regla vive en useSellerOrders.canMove y rechaza ANTES de llamar al
     // service: el toast lleva el mensaje literal del hook.

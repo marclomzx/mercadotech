@@ -70,7 +70,7 @@ test.describe("flujo vendedor", () => {
       await expect(kanban.isCardInColumn(PAID_ORDER_ID, "pagado")).toBeVisible();
 
       // focus en el asa → Space → ArrowRight → Space (decisión 9).
-      await kanban.moveOrderForward(PAID_ORDER_ID);
+      await kanban.moveOrderForward(PAID_ORDER_ID, "enviado");
 
       await expect(kanban.isCardInColumn(PAID_ORDER_ID, "enviado")).toBeVisible();
       await expect(kanban.isCardInColumn(PAID_ORDER_ID, "pagado")).toHaveCount(0);
