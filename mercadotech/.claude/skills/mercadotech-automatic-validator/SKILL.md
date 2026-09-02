@@ -23,10 +23,19 @@ es un paso aparte, humano-supervisado.
 - [ ] `npm run lint` exit 0 — si no, FALLIDA (pegar el error tal cual salió).
 - [ ] `npm run type-check` exit 0 — si no, FALLIDA (pegar el error tal cual salió).
 - [ ] `npm run build` exit 0 — si no, FALLIDA (pegar el error tal cual salió).
-- [ ] `npm run test` — **desde la sesión 6.** Hoy (`package.json` raíz) este
-  script no existe todavía: el ítem se marca `N/A (sesión 6)` y NO cuenta
-  como fallo mientras no exista. En cuanto exista, pasa a ser obligatorio
-  como los demás.
+- [ ] `npm run test` exit 0 — **obligatorio desde la sesión 6** (el script ya
+  existe). Un solo test en rojo = FALLIDA; pegar el `AssertionError` tal cual,
+  con archivo y línea. Ya no aplica el `N/A` de antes.
+- [ ] `npm run test:e2e` exit 0 — **solo si el stack local está arriba**
+  (`supabase status` responde sin error). Si Docker/Supabase están apagados,
+  el ítem se marca `N/A (stack local apagado)` y NO cuenta como fallo: los
+  E2E exigen la base sembrada. Si está arriba y falla, es FALLIDA.
+  Antes de correrlos, **`supabase db reset`**: los E2E crean pedidos y mueven
+  el kanban, así que una segunda corrida sobre la base sucia falla por
+  precondición, no por un bug. Y correrlos con **paridad de producción**
+  (`npm run build && npm run start` levantado antes): contra `next dev` hay
+  fallos conocidos que NO son del producto — ver `docs/DEBUGGING.md` →
+  "E2E que pasan en local y fallan en CI".
 - [ ] Si el cambio tocó `mcp/`: `npm run type-check` dentro de `mcp/` exit 0
   (una vez que ese script exista, a partir de la Fase 5.2).
 
