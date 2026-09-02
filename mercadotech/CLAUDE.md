@@ -15,6 +15,9 @@ npm run start          # sirve el build de producción
 npm run lint            # ESLint
 npm run type-check       # tsc --noEmit
 npm run db:types          # regenera types/database.ts desde la BD local
+npm run test               # Vitest — lógica pura y services, sin red
+npm run test:coverage       # ídem + reporte de cobertura (lib/ y services/)
+npm run test:e2e             # Playwright — requiere supabase start && supabase db reset antes
 npx tsx scripts/index-all.ts   # reindexa productos activos + artículos
                                  # publicados en knowledge_embeddings (RAG)
 ```
@@ -120,6 +123,36 @@ mover un archivo — ¿va aquí, con estas dependencias?),
 una checklist fija). Las cuatro REPORTAN; ninguna edita código — la
 corrección siempre es un paso aparte y humano-supervisado.
 
+**Norma del ciclo (sesión 6):** al cerrar cualquier feature, el orden es
+`mercadotech-code-reviewer` → correcciones → `mercadotech-automatic-validator`,
+que desde esta sesión corre `npm run test` (obligatorio) y `npm run
+test:e2e` si el stack local está arriba. Diagnóstico de fallos en
+[docs/DEBUGGING.md](docs/DEBUGGING.md).
+
+## Testing (sesión 6)
+
+* El test unitario vive JUNTO al archivo (`cart.service.test.ts` al lado de
+  `cart.service.ts`); los E2E viven en `e2e/`.
+* Los tests inyectan el cliente Supabase por parámetro — jamás `vi.mock` de
+  `lib/supabase/*`; `lib/ai/*` sí se mockea por módulo (única excepción,
+  comentada en el test que la usa).
+* El test documenta el CONTRATO REAL, no el deseado: si un comportamiento
+  parece un bug, se ancla al código y se anota — no se "corrige" callado.
+* `data-testid` en kebab-case con prefijo de dominio
+  (`cart-item-quantity`, `kanban-column-pagado`) — único cambio permitido
+  en un componente solo para testear, nunca lógica ni estilos.
+
+## CI (GitHub Actions, sesión 6)
+
+`.github/workflows/ci.yml` corre en cada push a `main` y en cada PR: job
+`checks` (lint, type-check, tests con cobertura, type-check de `mcp/`) y
+job `e2e` (Supabase efímero + Playwright chromium, contra
+`npm run build && npm run start` — nunca contra `next dev`). Cero secretos:
+las claves del stack efímero se leen en caliente con `supabase status`.
+`packageManager` en `package.json` debe coincidir SIEMPRE con el pin de
+npm del workflow (lección "Missing ... from lock file") — no se toca uno
+sin el otro.
+
 ## Mapa de rutas
 
 `(shop)`: `/` · `/buscar?q=` · `/categoria/[slug]` · `/producto/[id]` ·
@@ -139,12 +172,15 @@ públicos — solo la pestaña "Resultados con IA" de `/buscar` pide sesión.
 
 * **Completadas:** sesión 2 (infraestructura), sesión 3 (MVP funcional),
   sesión 4 (RAG: búsqueda semántica, asesor de compras, soporte con
-  tickets) y sesión 5 (servidor MCP de solo lectura + 4 Skills de
-  gobernanza, con su propio ciclo de revisión ya corrido).
+  tickets), sesión 5 (servidor MCP de solo lectura + 4 Skills de
+  gobernanza) y sesión 6 (292 tests unitarios + 8 E2E + CI en GitHub
+  Actions, verde).
 * **Pendientes heredados:** sesión 1 completa (`docs/COSTOS.md`,
   `docs/PROMPTS.md`) y Fase 2.6 (`supabase/tests/` vacío: faltan los scripts
   de validación RLS).
-* **Siguiente:** sesión 6.
+* **Siguiente:** sesión 7 — performance, secretos y despliegue a Vercel (el
+  CI ya quedó resuelto en la sesión 6, no vuelve a aparecer). El sitio
+  todavía NO está en línea: la app apunta a Supabase local.
 * Detalle por fase, decisiones y limitaciones vigentes en
   [docs/BITACORA.md](docs/BITACORA.md); casos de prueba y calibración del
   RAG en [docs/RAG.md](docs/RAG.md); pasada de calidad de la sesión 3 en

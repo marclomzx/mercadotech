@@ -20,6 +20,267 @@ fuera a propósito.
 
 ---
 
+## Sesión 6 — Testing, debugging y CI con GitHub Actions (2026-09-01 / 2026-09-02)
+
+**Alcance:** red de seguridad completa sobre MercadoTech: 292 tests unitarios
+(Vitest) sobre lógica pura y services con Supabase inyectado, 8 specs E2E
+(Playwright) sobre los flujos comprador y vendedor, y un pipeline de CI en
+GitHub Actions que corre todo en cada push y PR. 63 archivos, +11011/-3930
+líneas (`git diff --stat 269d0e3..HEAD`).
+
+> **Desviación de la spec, misma clase que otras sesiones:** el Prompt 0 de
+> esta sesión cita el commit `eed65ff` como cierre de la sesión 5. Ese hash
+> **no existe** en el historial — el cierre real es `269d0e3` ("docs: add
+> project log and update CLAUDE.md at close of Sesión 5"). Se usa ese en
+> todo este documento.
+
+> **Cambio de alcance decidido por el docente (registrado en la propia
+> spec, `MercadoTech_sesion6.md`):** esta sesión ABSORBE el pipeline de CI
+> de GitHub Actions, antes planeado como Fase 7.1. La sesión 7 conserva
+> performance, secretos y despliegue en Vercel — sin CI, porque ya quedó
+> resuelto acá.
+
+### Prompt 0 — Conexión a GitHub e instalación de herramientas (commits `62aae54`, `1c09e1d`)
+
+**Construido:** remoto `origin` conectado a
+`https://github.com/marclomzx/mercadotech.git`, rama local renombrada
+`master` → `main` (la spec y el CI asumen `main`), `vitest` +
+`@vitest/coverage-v8` y `@playwright/test` + sus 3 navegadores instalados.
+
+**Problema — el repo remoto no estaba vacío pese a la spec:** al crearlo en
+GitHub quedó marcada "Add a README", así que trajo un commit propio
+(`0e27116`, README de una línea) que chocó con el primer push. Se resolvió
+con `git merge --allow-unrelated-histories`, conservando el README real del
+proyecto (commit `1c09e1d`) — nada se perdió.
+
+**Decisión — Vitest se fija en `3.2.7`, no en la última versión:** instalar
+`vitest@latest` (4.1.11) rompió el entorno: arrastra `rolldown`/`vite@8`,
+que en Windows con Node local (`v20.13.1`) ni siquiera resuelve el binding
+nativo. `3.2.7` es la última versión de la familia 3.x, sin esa
+dependencia, compatible con el Node de la máquina.
+
+### Fase 6.1 — Infraestructura de Vitest (commit `89488fc`)
+
+**Construido:** `vitest.config.ts` (environment `node` — sin jsdom, decisión
+6: esta sesión no testea componentes React), alias `@/` igual que
+`tsconfig.json`, cobertura v8 acotada a `lib/` y `services/`; scripts
+`test`, `test:watch`, `test:coverage`.
+
+### Fase 6.2 — Tests de lógica pura (commit `0c5b7fa`)
+
+**Construido:** 78 tests sobre `lib/validators/{auth,product}.ts` (100 % de
+ramas), `lib/utils.ts` (`cn`, `formatPrice` — sin fechas, decisión 3: no
+existen en el código), `lib/ai/context-builder.ts` (100 % de ramas) y
+`lib/ai/prompts.ts`. Cero mocks: todo el código bajo prueba es puro.
+
+### Fase 6.3 — Tests de services con Supabase mockeado (commit `d2d41ba`)
+
+**Construido:** `services/test-utils/supabase-mock.ts` (fábrica encadenable
+programable por tabla/operación), 15 archivos de test de services y
+`hooks/useSellerOrders.test.ts` (el helper `canMove` del kanban, exportado
+sin cambio de lógica — ya estaba exportado, contra lo que la spec asumía).
+
+**Decisión — mockeo de dos niveles (decisión 7 de la spec):** el cliente
+Supabase se INYECTA siempre (mock construido en el test); `lib/ai/*` es la
+única excepción, mockeada con `vi.mock` de módulo porque `chat.service` y
+`embedding.service` la importan directo (diseño de la sesión 4, sin
+parámetro por donde sustituirla). Documentado con comentario en cada test
+que usa la excepción.
+
+**Hallazgos anotados, NO corregidos (decisión 5 — el test documenta el
+contrato real):**
+1. `cart.service.addItem` no valida el signo de `quantity`: una cantidad
+   negativa reduce el carrito en vez de rechazarse.
+2. Si el total resultante queda ≤ 0 con stock abundante, el mensaje de
+   error dice "Este producto no tiene stock disponible" aunque la causa sea
+   otra.
+
+### Fase 6.4 — Infraestructura de Playwright (commit `88a5427`)
+
+**Construido:** `playwright.config.ts` (webServer: `build && start` en CI,
+reutiliza `npm run dev` en local), 7 Page Objects, `e2e/data/users.ts`
+(seed), `e2e/data/product-image.jpg` (JPEG real generado con Pillow), smoke
+`home.spec.ts`; `data-testid` en 14 componentes (grep pasó de 0 a 14
+archivos tocados) — solo el atributo, verificado archivo por archivo antes
+de commitear.
+
+**Decisión:** dos componentes (`Price`, `OrderStatusBadge`) no aceptaban
+props extra, así que se les agregó `"data-testid"?: string` como prop
+opcional reenviada a su elemento raíz — mismo criterio que "solo el
+atributo", sin tocar estructura ni estilos.
+
+### Fase 6.5 — E2E: flujo comprador (commit `15b9254`)
+
+**Construido:** `buyer-flow.spec.ts` (8 pasos con `test.step`, aserciones
+sobre el pedido RECIÉN creado por id de la URL) y `buyer-negative.spec.ts`
+(stock 0, carrito vacío, anónimo redirigido).
+
+**Hallazgo real de entorno, diagnosticado y no maquillado:** bajo `next
+dev`, un click sobre un `DropdownMenuItem` que envuelve un `<Link>`
+navega de forma intermitente — carrera entre el cierre del menú (base-ui)
+y la navegación de Next, agravada por React StrictMode/Fast Refresh.
+Verificado dos veces contra `next build && next start`: 100 % estable. No
+es un bug de producto; es exactamente lo que la decisión 12 de la spec ya
+anticipaba (por eso el CI usa build de producción). Se agregó un helper de
+reintento en `e2e/pages/interactions.ts` como buena práctica, y la
+verificación de esta fase se hizo contra el build de producción.
+
+### Fase 6.6 — E2E: flujo vendedor (commit `658b5ed`)
+
+**Construido:** `seller-flow.spec.ts` (publicar producto, mover el kanban
+por TECLADO, verificar persistencia tras `page.reload()`, y que el
+comprador vea el nuevo estado) y `seller-negative.spec.ts` (buyer1 fuera del
+panel, retroceso de estado rechazado).
+
+**Corrección de datos, verificada contra el seed real:** la spec (y el
+prompt de esta fase) asumían que `c…03` está `'pagado'` y que `c…04` es
+multi-vendedor `'enviado'`. `supabase/seed.sql` dice otra cosa: `c…03` ya
+nace `'enviado'` (de seller2), `c…04` está `'entregado'`. El único pedido
+`'pagado'` del seed es **`c…02`** (multi-vendedor, comprador buyer1) — ese
+es el que el flujo positivo mueve, y `c…03` el que usa el negativo de
+retroceso.
+
+**Hallazgo real de CI, no de producto:** en el runner (más lento que la
+máquina local), el `Space` de soltar la tarjeta llegaba antes de que la
+flecha terminara de procesarse — la tarjeta se soltaba en su propia
+columna y el movimiento nunca ocurría. Corregido esperando estado
+observable de dnd-kit (`aria-pressed="true"` al tomar, el anuncio de
+accesibilidad "sobre la columna X" antes de soltar) en vez de asumir que
+cada tecla ya surtió efecto.
+
+### Fase 6.7 — Pipeline de CI en GitHub Actions (commits `aa04165`,
+`a322e0b`, `bbd7dfb`, `134f11d`, `5d0746c`)
+
+**Construido:** `.github/workflows/ci.yml` con los jobs `checks` (lint,
+type-check, tests con cobertura, type-check de `mcp/`) y `e2e` (needs:
+checks; Supabase efímero; Playwright chromium); `packageManager:
+"npm@11.6.2"` en `package.json`. Cero secretos.
+
+**Decisión — pin de npm (decisión 10):** el runner instala
+`npm@11.6.2` global antes de `npm ci`, coincidiendo con `packageManager`.
+Evita que una versión de npm más nueva que la que generó el lockfile espere
+entradas de dependencias opcionales por plataforma que ese lockfile no
+escribió (`Missing ... from lock file`). Verificado contra el lockfile
+real: trae las variantes Linux de los 6 paquetes nativos del proyecto.
+
+**Decisión — credenciales dinámicas (decisión 11):** el job `e2e` lee
+`supabase status -o json` + `jq` y pasa `API_URL`/`ANON_KEY` como env del
+paso de tests. No son secretos: `supabase start` genera siempre las mismas
+claves demo públicas, sobre una base que vive y muere dentro del runner.
+
+**Tres corridas rojas antes de la verde, cada una diagnosticada hasta la
+causa real (ninguna resuelta debilitando un test):**
+1. `tsconfig.json` de la raíz incluía `mcp/tsup.config.ts` (`**/*.ts` sin
+   excluir `mcp`), así que `next build` dependía de que `mcp/node_modules`
+   existiera. Local nunca falló porque ya estaba instalado. Corregido
+   agregando `mcp` al `exclude` de la raíz.
+2. La misma carrera de teclado del kanban descrita en la Fase 6.6, vista
+   por primera vez en el runner.
+3. (Diagnóstico intermedio) un paso temporal de logging del build, retirado
+   en el commit siguiente en cuanto confirmó la causa #1.
+
+**Verificado en vivo, con evidencia de la pestaña Actions:** push a `main`
+con ambos jobs en verde (`checks` 38s, `e2e` 259s — corrida #9,
+`426604c`); PR #1 (`ci-smoke → main`) con un test roto puesto en rojo con
+el `AssertionError` exacto, revertido, verde, y cerrado sin merge
+(`merged: false`, confirmado por API).
+
+**Hallazgo, no corregido — es decisión del usuario:** el repositorio quedó
+**público**, no privado como pedía la spec. Verificado (`git ls-files`) que
+no hay secretos commiteados; solo `.env.example`.
+
+### Fase 6.8 — Debugging y actualización de los gates (commit `426604c`)
+
+**Construido:** `docs/DEBUGGING.md` (flujo síntoma→reproducir→logs→
+hipótesis→fix, cómo leer un fallo de CI, cómo pedirle debugging a Claude,
+tabla de errores típicos del stack con mensaje literal); actualización
+quirúrgica de `.claude/skills/mercadotech-automatic-validator/SKILL.md`:
+`npm run test` pasa a obligatorio, `npm run test:e2e` obligatorio solo si
+el stack local está arriba.
+
+**Verificado con el gate real:** se rompió una aserción a propósito → el
+validator (aplicando la checklist actualizada, ya que la Skill cargada en
+sesión seguía en caché) dio `VALIDACIÓN FALLIDA` citando el
+`AssertionError` con archivo y línea → se revirtió → `VALIDACIÓN APROBADA`
+con los 292 tests y los 8 E2E en verde.
+
+**Hallazgo propio del ejercicio:** correr `test:e2e` dos veces sin
+`supabase db reset` entre medio da una `VALIDACIÓN FALLIDA` que no es un
+bug — el segundo run hereda el estado que dejó el primero (el pedido ya
+movido). Se agregó esa precondición a la regla del ítem en la Skill.
+
+### Números finales de la sesión
+
+| Métrica | Valor |
+|---|---|
+| Tests unitarios | 292, en 21 archivos, todos verdes con Docker apagado |
+| Cobertura de `services/` | 100 % líneas · 99.23 % ramas (gate: ≥ 80 % líneas) |
+| Cobertura de `lib/validators/` y `context-builder.ts` | 100 % ramas |
+| Specs E2E | 8 (home, buyer-flow, buyer-negative ×3, seller-flow, seller-negative ×2), chromium |
+| Job `checks` en CI | 38 s (corrida #9, `426604c`) |
+| Job `e2e` en CI | 259 s (mismo run) |
+| `data-testid` agregados | 14 componentes, solo el atributo |
+
+### Fuera de alcance a propósito
+
+* **Tests de componentes React** (decisión 6): esta sesión solo cubre
+  lógica pura, services y flujos E2E — ningún componente se testea con
+  Testing Library, que ni se instaló.
+* **Tests del servidor MCP:** solo su `type-check` entra al job `checks`;
+  `mcp/src/` no tiene suite propia.
+* **Branch protection y deploy:** eso es sesión 7. El CI corre y reporta,
+  pero nada impide mergear con un check en rojo todavía.
+* **Secretos de producción, performance, Core Web Vitals:** sesión 7.
+
+---
+
+### (a) Criterios de aceptación de la sesión
+
+| Criterio | Estado | Evidencia |
+|---|---|---|
+| `npm run test` verde con Docker apagado, cobertura objetivo | ✅ | Fase 6.3: 292/292 con Docker detenido y verificado; `services/` 100 % líneas |
+| `npm run test:e2e` verde contra Supabase local con el seed | ✅ | Fases 6.5/6.6: 8/8, más el job `e2e` del CI contra un Supabase efímero |
+| Kanban drag & drop cubierto por E2E vía teclado | ✅ | Fase 6.6: `focus → Space → ArrowRight → Space`, sin mouse, con estado observable de dnd-kit |
+| Push y PR de prueba muestran ambos jobs en verde; un test roto los pone en rojo | ✅ | Fase 6.7: run #9 verde; PR #1 rojo→verde→cerrado sin merge, confirmado por API |
+| La Skill validator ejecuta los tests como parte del gate | ✅ | Fase 6.8: demostrado en vivo, `VALIDACIÓN FALLIDA` → revert → `VALIDACIÓN APROBADA` |
+| `lint`, `type-check` y `build` pasan | ✅ | Verificado al cierre de cada fase, local y en CI |
+
+### (b) Deuda técnica y limitaciones vigentes (nuevas de la sesión 6)
+
+1. **`cart.service.addItem` no valida el signo de `quantity`** (Fase 6.3,
+   ver arriba) — comportamiento real, anotado, no corregido.
+2. **El repositorio es público**, no privado — decisión pendiente del
+   usuario, sin impacto de seguridad hoy (cero secretos commiteados).
+3. **La rama `ci-smoke` sigue publicada en el remoto**, sin mergear —
+   evidencia intencional del ejercicio de la Fase 6.7; se puede borrar
+   cuando se quiera.
+4. **El grep de capas #4 del validator tiene un falso positivo** contra
+   `services/embedding.service.ts`: marca una mención en comentario
+   ("este service no puede importar `lib/supabase/admin.ts`"), no un
+   import real. Verificado, no corregido — no es código de esta sesión.
+
+### (c) Pendientes
+
+**Heredados de sesiones anteriores (sin cambios en esta sesión):**
+
+- **Sesión 1 completa:** sigue sin ejecutarse. Faltan `docs/COSTOS.md` y
+  `docs/PROMPTS.md`.
+- **Fase 2.6:** `supabase/tests/` sigue vacío (solo `.gitkeep`). Faltan los
+  scripts de validación RLS.
+
+**Para la sesión 7** (performance, secretos y despliegue — el CI que antes
+era Fase 7.1 ya quedó resuelto en esta sesión, no vuelve a aparecer):
+
+- Auditoría de performance / Core Web Vitals.
+- Manejo de secretos de producción (hoy `.env.local` es manual).
+- Despliegue a Vercel: la app hoy apunta a
+  `NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:54321` (local) y no hay
+  `vercel.json` ni proyecto vinculado — el sitio NO está en línea todavía.
+- Branch protection en GitHub (checks obligatorios para mergear).
+- Documentación final del proyecto.
+
+---
+
 ## Sesión 5 — Servidor MCP y ciclo de gobernanza (2026-08-31 / 2026-09-01)
 
 **Alcance:** servidor MCP de solo lectura (`mcp/`) que expone el catálogo,
