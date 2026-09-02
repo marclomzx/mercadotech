@@ -1,11 +1,10 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import type { FormEvent } from "react";
 
-import {
-  SortableImageGallery,
-  type GalleryItem,
-} from "@/components/seller/SortableImageGallery";
+import { LoadingState } from "@/components/shared/LoadingState";
+import type { GalleryItem } from "@/components/seller/SortableImageGallery";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -21,6 +20,16 @@ import { PRODUCT_CONDITIONS, type ProductCondition } from "@/lib/constants/roles
 import type { Database } from "@/types/database";
 
 type Category = Database["public"]["Tables"]["categories"]["Row"];
+
+// La galería arrastra @dnd-kit/{core,sortable,utilities} y era la única razón
+// de que /vendedor/publicar y /vendedor/productos/[id]/editar fueran las dos
+// rutas más pesadas del proyecto (277 kB First Load JS). Se carga aparte:
+// nadie necesita el código de drag & drop hasta que el formulario está en
+// pantalla. ssr:false porque dnd-kit necesita DOM real de todos modos.
+const SortableImageGallery = dynamic(
+  () => import("@/components/seller/SortableImageGallery").then((m) => m.SortableImageGallery),
+  { ssr: false, loading: () => <LoadingState lines={2} /> },
+);
 
 export type ProductFormValues = {
   title: string;
