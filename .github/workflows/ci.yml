@@ -64,15 +64,6 @@ jobs:
       - name: Instalar dependencias
         run: npm ci
 
-      - name: Instalar dependencias del servidor MCP
-        # ANTES del type-check de la raíz, a propósito. El tsconfig.json de la
-        # raíz incluye "**/*.ts", lo que abarca también mcp/**: sin las
-        # dependencias de mcp/ instaladas, `tsc --noEmit` de la raíz falla con
-        # "Cannot find module 'tsup'". Local nunca se nota porque
-        # mcp/node_modules ya está ahí; en un checkout limpio, sí.
-        working-directory: mercadotech/mcp
-        run: npm ci
-
       - name: Type-check
         run: npm run type-check
 
@@ -83,6 +74,10 @@ jobs:
         # La suite NO abre red (Supabase inyectado, lib/ai mockeado por
         # módulo): por eso este job no necesita Docker ni stack levantado.
         run: npm run test:coverage
+
+      - name: Instalar dependencias del servidor MCP
+        working-directory: mercadotech/mcp
+        run: npm ci
 
       - name: Type-check del servidor MCP
         # mcp/ es un proyecto Node aparte que comparte el alias @/* con la
@@ -173,25 +168,6 @@ jobs:
           STATUS=$(supabase status -o json)
           echo "api_url=$(echo "$STATUS" | jq -r '.API_URL')" >> "$GITHUB_OUTPUT"
           echo "anon_key=$(echo "$STATUS" | jq -r '.ANON_KEY')" >> "$GITHUB_OUTPUT"
-
-      - name: TEMPORAL — diagnóstico del build de producción
-        # Se quita en cuanto quede diagnosticado el fallo del webServer.
-        env:
-          NEXT_PUBLIC_SUPABASE_URL: ${{ steps.supabase.outputs.api_url }}
-          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ steps.supabase.outputs.anon_key }}
-          NEXT_PUBLIC_SITE_URL: http://localhost:3000
-        run: |
-          set +e
-          npm run build > build.log 2>&1
-          code=$?
-          echo "BUILD EXIT: $code"
-          tail -40 build.log
-          if [ $code -ne 0 ]; then
-            grep -nE "Error|error|Cannot|failed|Failed|not found" build.log | tail -8 | while IFS= read -r l; do
-              echo "::error::BUILD $l"
-            done
-          fi
-          exit $code
 
       - name: Correr los E2E
         # El workflow NO levanta la app: de eso se encarga el `webServer` de
