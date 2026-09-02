@@ -52,6 +52,10 @@ export default defineConfig({
     // Local: si `npm run dev` ya está corriendo (lo normal mientras se
     // trabaja), lo reutiliza en vez de levantar un segundo servidor.
     reuseExistingServer: !isCI,
-    timeout: isCI ? 180_000 : 60_000,
+    // En CI el `npm ci` borra .next, así que el build arranca EN FRÍO sobre
+    // un runner de 2 núcleos: 180s se queda corto de más. El job igual tiene
+    // su propio tope de 20 min, así que un timeout holgado acá solo evita
+    // fallos falsos, no esconde nada.
+    timeout: isCI ? 300_000 : 60_000,
   },
 });

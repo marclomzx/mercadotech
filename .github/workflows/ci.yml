@@ -64,6 +64,15 @@ jobs:
       - name: Instalar dependencias
         run: npm ci
 
+      - name: Instalar dependencias del servidor MCP
+        # ANTES del type-check de la raíz, a propósito. El tsconfig.json de la
+        # raíz incluye "**/*.ts", lo que abarca también mcp/**: sin las
+        # dependencias de mcp/ instaladas, `tsc --noEmit` de la raíz falla con
+        # "Cannot find module 'tsup'". Local nunca se nota porque
+        # mcp/node_modules ya está ahí; en un checkout limpio, sí.
+        working-directory: mercadotech/mcp
+        run: npm ci
+
       - name: Type-check
         run: npm run type-check
 
@@ -74,10 +83,6 @@ jobs:
         # La suite NO abre red (Supabase inyectado, lib/ai mockeado por
         # módulo): por eso este job no necesita Docker ni stack levantado.
         run: npm run test:coverage
-
-      - name: Instalar dependencias del servidor MCP
-        working-directory: mercadotech/mcp
-        run: npm ci
 
       - name: Type-check del servidor MCP
         # mcp/ es un proyecto Node aparte que comparte el alias @/* con la
