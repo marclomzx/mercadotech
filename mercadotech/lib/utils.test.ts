@@ -29,9 +29,7 @@ describe("formatPrice", () => {
     new Intl.NumberFormat("es-PE", { style: "currency", currency: "PEN" }).format(value);
 
   it("formatea 0", () => {
-    // ROTO A PROPÓSITO (Fase 6.7): comprobar que el CI marca el PR en rojo.
-    // Se revierte en el commit siguiente.
-    expect(formatPrice(0)).toBe(golden(1));
+    expect(formatPrice(0)).toBe(golden(0));
   });
 
   it("redondea a 2 decimales", () => {
