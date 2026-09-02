@@ -25,10 +25,12 @@ type Category = Database["public"]["Tables"]["categories"]["Row"];
 // de que /vendedor/publicar y /vendedor/productos/[id]/editar fueran las dos
 // rutas más pesadas del proyecto (277 kB First Load JS). Se carga aparte:
 // nadie necesita el código de drag & drop hasta que el formulario está en
-// pantalla. ssr:false porque dnd-kit necesita DOM real de todos modos.
+// pantalla. Se deja el SSR por default (NO ssr:false): medido, el bundle
+// queda igual con o sin él, y desactivarlo solo agregaba una espera de chunk
+// antes de que el formulario fuera usable.
 const SortableImageGallery = dynamic(
   () => import("@/components/seller/SortableImageGallery").then((m) => m.SortableImageGallery),
-  { ssr: false, loading: () => <LoadingState lines={2} /> },
+  { loading: () => <LoadingState lines={2} /> },
 );
 
 export type ProductFormValues = {

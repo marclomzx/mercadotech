@@ -13,10 +13,11 @@ import { useSellerOrders } from "@/hooks/useSellerOrders";
 
 // El tablero arrastra @dnd-kit/core y solo se muestra cuando el vendedor ya
 // tiene pedidos: con la lista vacía (o cargando, o en error) ese código nunca
-// hace falta. ssr:false porque dnd-kit mide rects del DOM real.
+// hace falta. Se deja el SSR por default (NO ssr:false): medido, el First
+// Load JS es el mismo, y desactivarlo solo retrasaba la aparición del tablero.
 const OrdersKanban = dynamic(
   () => import("@/components/seller/OrdersKanban").then((m) => m.OrdersKanban),
-  { ssr: false, loading: () => <LoadingState lines={5} /> },
+  { loading: () => <LoadingState lines={5} /> },
 );
 
 export function SellerOrdersView() {
