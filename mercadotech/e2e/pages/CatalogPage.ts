@@ -1,5 +1,7 @@
 import type { Locator, Page } from "@playwright/test";
 
+import { clickMenuLinkAndWaitForUrl } from "@/e2e/pages/interactions";
+
 export class CatalogPage {
   constructor(private page: Page) {}
 
@@ -27,8 +29,14 @@ export class CatalogPage {
   // el trigger es un botón "Categorías" y cada opción es un menuitem con el
   // nombre de la categoría).
   async filterByCategory(categoryName: string) {
-    await this.page.getByRole("button", { name: "Categorías" }).click();
-    await this.page.getByRole("menuitem", { name: categoryName }).click();
+    await clickMenuLinkAndWaitForUrl(
+      this.page,
+      async () => {
+        await this.page.getByRole("button", { name: "Categorías" }).click();
+        await this.page.getByRole("menuitem", { name: categoryName }).click();
+      },
+      /\/categoria\//,
+    );
   }
 
   userMenu(): Locator {
