@@ -1,15 +1,23 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { toast } from "sonner";
 
-import { OrdersKanban } from "@/components/seller/OrdersKanban";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { ErrorState } from "@/components/shared/ErrorState";
 import { LoadingState } from "@/components/shared/LoadingState";
 import { buttonVariants } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
 import { useSellerOrders } from "@/hooks/useSellerOrders";
+
+// El tablero arrastra @dnd-kit/core y solo se muestra cuando el vendedor ya
+// tiene pedidos: con la lista vacía (o cargando, o en error) ese código nunca
+// hace falta. ssr:false porque dnd-kit mide rects del DOM real.
+const OrdersKanban = dynamic(
+  () => import("@/components/seller/OrdersKanban").then((m) => m.OrdersKanban),
+  { ssr: false, loading: () => <LoadingState lines={5} /> },
+);
 
 export function SellerOrdersView() {
   const { user } = useAuth();
