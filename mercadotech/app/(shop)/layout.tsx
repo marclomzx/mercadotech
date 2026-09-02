@@ -18,7 +18,7 @@ export default function ShopLayout({ children }: { children: ReactNode }) {
         <Container className="py-6">{children}</Container>
       </main>
       <footer className="border-t py-6 text-center text-sm text-muted-foreground">
-        <Container>© {new Date().getFullYear()} MercadoTech</Container>
+        <Container>© {new Date().getFullYear()} MercadoTech · Marketplace de tecnología</Container>
       </footer>
     </div>
   );
