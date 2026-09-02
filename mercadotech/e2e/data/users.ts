@@ -29,9 +29,20 @@ export const BUYER2: TestUser = {
 };
 
 // a0000000-…-0004 · ElectroMax Perú. Vendedor con productos y pedidos reales
-// del seed (incluye un pedido 'pagado', punto de partida del E2E de kanban).
+// del seed. Tiene ítems en c…02, el ÚNICO pedido 'pagado' del seed — punto
+// de partida del E2E de kanban.
 export const SELLER1: TestUser = {
   email: "seller1@mercadotech.test",
   password: SEED_PASSWORD,
   displayName: "ElectroMax Perú",
+};
+
+// a0000000-…-0005 · GamerZone Store. Es el dueño de los dos ítems de c…03,
+// el único pedido que YA nace 'enviado' en el seed: por eso el negativo de
+// retroceso (enviado → pagado) usa este vendedor y no seller1, que no tiene
+// ningún 'enviado' propio sin depender de que el flujo positivo haya corrido.
+export const SELLER2: TestUser = {
+  email: "seller2@mercadotech.test",
+  password: SEED_PASSWORD,
+  displayName: "GamerZone Store",
 };

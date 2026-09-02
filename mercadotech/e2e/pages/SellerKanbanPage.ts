@@ -26,9 +26,21 @@ export class SellerKanbanPage {
   // listener vive en su propio nodo raíz): foco → Space toma la tarjeta →
   // flecha salta a la columna vecina → Space la suelta ahí.
   async moveOrderForward(orderId: string) {
-    await this.card(orderId).focus();
+    await this.moveWithKeyboard(orderId, "ArrowRight");
+  }
+
+  // Mismo camino, hacia atrás. Lo usa el negativo: la UI debe rechazar el
+  // retroceso (la regla vive en useSellerOrders.canMove).
+  async moveOrderBackward(orderId: string) {
+    await this.moveWithKeyboard(orderId, "ArrowLeft");
+  }
+
+  private async moveWithKeyboard(orderId: string, arrow: "ArrowLeft" | "ArrowRight") {
+    const card = this.card(orderId);
+    await card.waitFor();
+    await card.focus();
     await this.page.keyboard.press("Space");
-    await this.page.keyboard.press("ArrowRight");
+    await this.page.keyboard.press(arrow);
     await this.page.keyboard.press("Space");
   }
 }
