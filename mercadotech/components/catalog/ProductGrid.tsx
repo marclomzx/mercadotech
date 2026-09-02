@@ -23,10 +23,6 @@ const SKELETON_COUNT = 8;
 
 const GRID_CLASSES = "grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4";
 
-// 2 = la primera fila en móvil (grid-cols-2), el viewport con el que se mide
-// Core Web Vitals.
-const PRIORITY_IMAGE_COUNT = 2;
-
 function ProductCardSkeleton() {
   return (
     <div className="space-y-2">
@@ -61,16 +57,8 @@ export function ProductGrid({
 
   return (
     <div className={GRID_CLASSES}>
-      {products.map((product, index) => (
-        <ProductCard
-          key={product.id}
-          product={product}
-          similarity={similarities?.[product.id]}
-          // Solo la primera fila EN MÓVIL (2 columnas), que es donde vive el
-          // LCP del catálogo y el viewport con el que se mide. Marcar más
-          // imágenes las pone a competir por ancho de banda y empeora el LCP.
-          priority={index < PRIORITY_IMAGE_COUNT}
-        />
+      {products.map((product) => (
+        <ProductCard key={product.id} product={product} similarity={similarities?.[product.id]} />
       ))}
     </div>
   );

@@ -13,21 +13,11 @@ type ProductCardProps = {
   // card por prop en vez de duplicarlo — el resto de usos (catálogo,
   // favoritos, panel del vendedor) no lo pasan y no ven ningún cambio.
   similarity?: number;
-  // Lo pasa ProductGrid solo a las cards de la primera fila visible: esa
-  // imagen es el LCP del catálogo.
-  priority?: boolean;
 };
-
-// Espeja EXACTAMENTE los breakpoints del grid de ProductGrid
-// (2 columnas → sm:3 → lg:4). Sin esto se usa el default de ProductImage,
-// pensado para otros layouts: pedía 25vw entre 768 y 1024 px (donde la card
-// mide ~33vw, imagen borrosa) y 50vw entre 640 y 768 (donde mide ~33vw,
-// bytes de más).
-const GRID_SIZES = "(min-width: 1024px) 25vw, (min-width: 640px) 33vw, 50vw";
 
 // Puro: recibe el Product ya resuelto (price:number, image_url, rating).
 // No conoce Supabase — el service ya hizo todo el trabajo de mapeo.
-export function ProductCard({ product, similarity, priority }: ProductCardProps) {
+export function ProductCard({ product, similarity }: ProductCardProps) {
   return (
     <Link
       href={`/producto/${product.id}`}
@@ -39,8 +29,6 @@ export function ProductCard({ product, similarity, priority }: ProductCardProps)
           src={product.image_url}
           alt={product.title}
           className="aspect-square w-full rounded-md"
-          sizes={GRID_SIZES}
-          priority={priority}
         />
         {similarity !== undefined && (
           // Nada de "similitud" ni porcentajes crudos de cara al usuario:
