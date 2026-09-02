@@ -16,7 +16,9 @@ const eslintConfig = [
     // bundle de tsup con el SDK de MCP incluido, no código propio; sin este
     // ignore, `npm run lint` en la raíz falla apenas alguien construye el
     // servidor MCP.
-    ignores: [".next/**", "out/**", "build/**", "next-env.d.ts", "mcp/dist/**"],
+    // "coverage/**": reporte HTML de `npm run test:coverage` (Fase 6.1) —
+    // mismo motivo: es salida generada, no código propio.
+    ignores: [".next/**", "out/**", "build/**", "next-env.d.ts", "mcp/dist/**", "coverage/**"],
   },
 ];
 
