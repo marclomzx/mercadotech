@@ -18,6 +18,10 @@ export default defineConfig({
       // queda fuera para que el reporte no diluya el % con código no
       // cubierto a propósito (decisión 6).
       include: ["lib/**", "services/**"],
+      // services/test-utils/ es andamiaje de los tests (Fase 6.3), no código
+      // de producción: contarlo inflaría el % de services/ con un archivo
+      // escrito para estar cubierto.
+      exclude: ["services/test-utils/**"],
     },
   },
   resolve: {
