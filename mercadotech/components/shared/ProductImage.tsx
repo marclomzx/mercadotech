@@ -11,12 +11,16 @@ type ProductImageProps = {
   alt: string;
   className?: string;
   sizes?: string;
+  // Solo para la imagen que es el LCP de la pantalla (la portada
+  // above-the-fold): la saca del lazy-load para que el navegador la
+  // descubra de inmediato. Marcar varias compite entre sí y no sirve.
+  priority?: boolean;
 };
 
 // Las imágenes del seed no existen todavía en Storage (gap conocido,
 // documentado en supabase/seed.sql): sin src o si next/image dispara
 // onError, se muestra un placeholder en vez de un ícono roto.
-export function ProductImage({ src, alt, className, sizes }: ProductImageProps) {
+export function ProductImage({ src, alt, className, sizes, priority }: ProductImageProps) {
   const [failed, setFailed] = useState(false);
   const showPlaceholder = !src || failed;
 
@@ -36,6 +40,7 @@ export function ProductImage({ src, alt, className, sizes }: ProductImageProps) 
           alt={alt}
           fill
           sizes={sizes ?? "(min-width: 768px) 25vw, 50vw"}
+          priority={priority}
           className="object-cover"
           onError={() => setFailed(true)}
         />
