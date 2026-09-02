@@ -1,0 +1,202 @@
+name: CI
+
+# El portero automático (Fase 6.7). Corre en cada push a main y en cada PR;
+# workflow_dispatch queda para relanzarlo a mano desde la pestaña Actions.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Un push nuevo sobre la misma rama cancela la corrida anterior: no tiene
+# sentido pagar minutos por validar un commit que ya quedó atrás.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Solo lectura del repo: este pipeline no publica nada, no comenta PRs y no
+# toca releases. Menos permisos, menos superficie.
+permissions:
+  contents: read
+
+env:
+  # DECISIÓN 10 (lección ReadHub, y el motivo de que exista este pin):
+  # el package-lock.json se generó en Windows. Si el runner instala con un
+  # npm MÁS NUEVO que el que escribió el lockfile, puede esperar entradas de
+  # dependencias opcionales por plataforma (las variantes Linux de swc,
+  # rollup, esbuild, lightningcss, oxide…) que ese lockfile nunca escribió, y
+  # `npm ci` —que por diseño no modifica el lockfile— aborta con
+  # "Missing ... from lock file". Pinear la versión hace la instalación
+  # determinista. DEBE coincidir con "packageManager" de package.json.
+  NPM_VERSION: "11.6.2"
+  NODE_VERSION: "24"
+  # La app Next vive en un subdirectorio del repo, no en la raíz.
+  APP_DIR: mercadotech
+
+jobs:
+  # ==========================================================
+  # Job 1 — checks: rápido, sin Docker. Todo lo que puede fallar
+  # barato falla acá antes de gastar un runner con navegadores.
+  # ==========================================================
+  checks:
+    name: checks (lint · types · unit)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: mercadotech
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Node ${{ env.NODE_VERSION }} + caché de npm
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          # El lockfile no está en la raíz del repo: hay que decírselo.
+          cache-dependency-path: mercadotech/package-lock.json
+
+      - name: Pinear npm ${{ env.NPM_VERSION }}
+        run: npm install -g npm@${{ env.NPM_VERSION }}
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Type-check
+        run: npm run type-check
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Tests unitarios con cobertura
+        # La suite NO abre red (Supabase inyectado, lib/ai mockeado por
+        # módulo): por eso este job no necesita Docker ni stack levantado.
+        run: npm run test:coverage
+
+      - name: Instalar dependencias del servidor MCP
+        working-directory: mercadotech/mcp
+        run: npm ci
+
+      - name: Type-check del servidor MCP
+        # mcp/ es un proyecto Node aparte que comparte el alias @/* con la
+        # raíz: si alguien rompe un service, su type-check lo detecta.
+        working-directory: mercadotech/mcp
+        run: npm run type-check
+
+      - name: Subir reporte de cobertura
+        # if: always() — la cobertura del intento fallido es justo la que se
+        # quiere mirar cuando algo se rompe.
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: mercadotech/coverage
+          retention-days: 7
+          if-no-files-found: warn
+
+  # ==========================================================
+  # Job 2 — e2e: navegador real contra la app real y un Supabase
+  # efímero. Solo corre si checks pasó (no tiene sentido levantar
+  # Docker para código que ni compila).
+  # ==========================================================
+  e2e:
+    name: e2e (chromium + Supabase efímero)
+    needs: checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: mercadotech
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Node ${{ env.NODE_VERSION }} + caché de npm
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: mercadotech/package-lock.json
+
+      - name: Pinear npm ${{ env.NPM_VERSION }}
+        run: npm install -g npm@${{ env.NPM_VERSION }}
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Caché de los navegadores de Playwright
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          # Por hash del lockfile: si cambia la versión de @playwright/test,
+          # cambia la clave y se vuelven a descargar los binarios correctos.
+          key: playwright-${{ runner.os }}-${{ hashFiles('mercadotech/package-lock.json') }}
+
+      - name: Instalar Chromium de Playwright
+        # Solo chromium en CI (los 3 navegadores quedan para local): un motor
+        # confiable alcanza para el gate y evita descargar ~400 MB de más.
+        # --with-deps instala las librerías de sistema que Chromium necesita.
+        run: npx playwright install --with-deps chromium
+
+      - name: Instalar la CLI de Supabase
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Levantar el Supabase efímero
+        # Docker ya viene en ubuntu-latest. Este stack nace y muere dentro
+        # del job: no toca ningún proyecto remoto.
+        run: supabase start
+
+      - name: Aplicar migraciones + seed
+        # Contrato de los E2E: parten SIEMPRE de la base sembrada, porque
+        # afirman sobre datos concretos del seed (c…02 'pagado', b…05 sin
+        # stock, los usuarios buyer1/seller1…).
+        run: supabase db reset
+
+      - name: Leer credenciales del Supabase local
+        id: supabase
+        # DECISIÓN 11: estas claves NO son secretos. `supabase start` genera
+        # siempre las mismas claves demo públicas, sobre una base que vive
+        # solo en este runner y se destruye al terminar. Se leen en caliente
+        # en vez de hardcodearlas para no romperse si la CLI las cambia.
+        run: |
+          STATUS=$(supabase status -o json)
+          echo "api_url=$(echo "$STATUS" | jq -r '.API_URL')" >> "$GITHUB_OUTPUT"
+          echo "anon_key=$(echo "$STATUS" | jq -r '.ANON_KEY')" >> "$GITHUB_OUTPUT"
+
+      - name: Correr los E2E
+        # El workflow NO levanta la app: de eso se encarga el `webServer` de
+        # playwright.config.ts, que en CI hace `npm run build && npm run start`
+        # (decisión 12 — paridad con producción). Estas env llegan al build,
+        # que es donde Next inlinea las NEXT_PUBLIC_*.
+        #
+        # Sin HUGGINGFACEHUB_API_TOKEN a propósito (decisión 8): ningún E2E
+        # afirma respuestas de IA, y el reindexado tras publicar es
+        # fire-and-forget que solo emite un console.warn si falla.
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ steps.supabase.outputs.api_url }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ steps.supabase.outputs.anon_key }}
+          NEXT_PUBLIC_SITE_URL: http://localhost:3000
+        run: npx playwright test --project=chromium
+
+      - name: Subir el reporte de Playwright (solo si falló)
+        # Solo en fallo: una corrida verde no debe dejar 100 MB de trazas y
+        # videos colgando por 14 días.
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            mercadotech/e2e/playwright-report
+            mercadotech/e2e/test-results
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Apagar el Supabase efímero
+        if: always()
+        run: supabase stop
