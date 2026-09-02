@@ -15,7 +15,7 @@ export function CartSummary({ subtotal, itemCount, checkingOut, onCheckout }: Ca
         <span className="text-sm text-muted-foreground">
           Subtotal ({itemCount} {itemCount === 1 ? "producto" : "productos"})
         </span>
-        <Price value={subtotal} size="lg" />
+        <Price value={subtotal} size="lg" data-testid="cart-subtotal" />
       </div>
 
       {/* Requisito explícito de la spec: el usuario debe saber que no hay
@@ -24,7 +24,12 @@ export function CartSummary({ subtotal, itemCount, checkingOut, onCheckout }: Ca
         Pago simulado para el laboratorio — no se realiza ningún cobro.
       </p>
 
-      <Button className="w-full" onClick={onCheckout} disabled={checkingOut || itemCount === 0}>
+      <Button
+        className="w-full"
+        onClick={onCheckout}
+        disabled={checkingOut || itemCount === 0}
+        data-testid="cart-checkout"
+      >
         {checkingOut ? "Procesando..." : "Finalizar compra"}
       </Button>
     </div>

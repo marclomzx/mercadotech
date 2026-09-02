@@ -50,6 +50,7 @@ export function LoginForm({ onSubmit, loading = false, error }: LoginFormProps) 
           onChange={(event) => setEmail(event.target.value)}
           aria-invalid={Boolean(errors.email)}
           aria-describedby={errors.email ? "email-error" : undefined}
+          data-testid="login-email"
         />
         {errors.email && (
           <p id="email-error" className="text-sm text-destructive">
@@ -68,6 +69,7 @@ export function LoginForm({ onSubmit, loading = false, error }: LoginFormProps) 
           onChange={(event) => setPassword(event.target.value)}
           aria-invalid={Boolean(errors.password)}
           aria-describedby={errors.password ? "password-error" : undefined}
+          data-testid="login-password"
         />
         {errors.password && (
           <p id="password-error" className="text-sm text-destructive">
@@ -82,7 +84,7 @@ export function LoginForm({ onSubmit, loading = false, error }: LoginFormProps) 
         </p>
       )}
 
-      <Button type="submit" className="w-full" disabled={loading}>
+      <Button type="submit" className="w-full" disabled={loading} data-testid="login-submit">
         {loading ? "Ingresando..." : "Ingresar"}
       </Button>
 

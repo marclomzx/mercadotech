@@ -130,6 +130,7 @@ function KanbanColumn({ status, orders, readOnly }: KanbanColumnProps) {
         isOver && !readOnly && "border-primary bg-primary/5",
         readOnly && "bg-muted/30",
       )}
+      data-testid={`kanban-column-${status}`}
     >
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-medium">{ORDER_STATUS_LABELS[status]}</h2>

@@ -45,25 +45,33 @@ export function UserMenu({ user, onLogout }: UserMenuProps) {
       <DropdownMenuTrigger
         render={<Button variant="ghost" size="icon" className="rounded-full" />}
         aria-label="Menú de usuario"
+        data-testid="user-menu"
       >
         <Avatar>
           <AvatarFallback>{initialsFrom(user.display_name)}</AvatarFallback>
         </Avatar>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        <DropdownMenuItem render={<Link href="/pedidos" />}>Mis pedidos</DropdownMenuItem>
+        <DropdownMenuItem render={<Link href="/pedidos" />} data-testid="user-menu-orders">
+          Mis pedidos
+        </DropdownMenuItem>
         <DropdownMenuItem render={<Link href="/favoritos" />}>Favoritos</DropdownMenuItem>
         {/* Omitidas a propósito en la sesión 3 (todavía no existían estas
             rutas) — decisión 3 de la Fase 4.7. */}
         <DropdownMenuItem render={<Link href="/asistente" />}>Asistente</DropdownMenuItem>
         <DropdownMenuItem render={<Link href="/soporte" />}>Soporte</DropdownMenuItem>
         {canSell && (
-          <DropdownMenuItem render={<Link href="/vendedor/productos" />}>
+          <DropdownMenuItem
+            render={<Link href="/vendedor/productos" />}
+            data-testid="user-menu-seller-panel"
+          >
             Panel vendedor
           </DropdownMenuItem>
         )}
         <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={onLogout}>Cerrar sesión</DropdownMenuItem>
+        <DropdownMenuItem onClick={onLogout} data-testid="user-menu-logout">
+          Cerrar sesión
+        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );

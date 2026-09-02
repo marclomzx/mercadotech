@@ -13,8 +13,10 @@ export function ProductInfo({ product }: ProductInfoProps) {
         <ConditionBadge condition={product.condition} />
         {product.brand && <span className="text-sm text-muted-foreground">{product.brand}</span>}
       </div>
-      <h1 className="text-xl font-semibold">{product.title}</h1>
-      <Price value={product.price} size="lg" />
+      <h1 className="text-xl font-semibold" data-testid="product-title">
+        {product.title}
+      </h1>
+      <Price value={product.price} size="lg" data-testid="product-price" />
       {product.description && (
         <p className="whitespace-pre-line text-sm text-muted-foreground">{product.description}</p>
       )}

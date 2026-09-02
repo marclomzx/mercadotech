@@ -22,6 +22,7 @@ export function ProductCard({ product, similarity }: ProductCardProps) {
     <Link
       href={`/producto/${product.id}`}
       className="group flex flex-col gap-2 rounded-lg border p-3 transition-colors hover:border-primary"
+      data-testid="product-card"
     >
       <div className="relative">
         <ProductImage
@@ -40,7 +41,9 @@ export function ProductCard({ product, similarity }: ProductCardProps) {
       </div>
       <div className="space-y-1">
         <ConditionBadge condition={product.condition} />
-        <h3 className="line-clamp-2 text-sm font-medium">{product.title}</h3>
+        <h3 className="line-clamp-2 text-sm font-medium" data-testid="product-card-title">
+          {product.title}
+        </h3>
         <Price value={product.price} />
         {product.review_count > 0 && (
           <div className="flex items-center gap-1.5">

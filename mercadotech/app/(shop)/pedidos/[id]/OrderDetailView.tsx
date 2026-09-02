@@ -71,7 +71,7 @@ export function OrderDetailView({ orderId }: OrderDetailViewProps) {
             {new Date(order.created_at).toLocaleDateString("es-PE")}
           </p>
         </div>
-        <OrderStatusBadge status={order.status} />
+        <OrderStatusBadge status={order.status} data-testid="order-status" />
       </div>
 
       <OrderItemsTable items={items} />

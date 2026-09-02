@@ -78,7 +78,7 @@ export function BuyBox({
             Cantidad
           </label>
           <Select value={quantity} onValueChange={(value) => value && setQuantity(value)}>
-            <SelectTrigger id="buybox-quantity" className="w-20">
+            <SelectTrigger id="buybox-quantity" className="w-20" data-testid="buybox-quantity">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -92,10 +92,19 @@ export function BuyBox({
         </div>
       )}
 
-      {reasonText && <p className="text-sm text-muted-foreground">{reasonText}</p>}
+      {reasonText && (
+        <p className="text-sm text-muted-foreground" data-testid="buybox-blocked-reason">
+          {reasonText}
+        </p>
+      )}
 
       <div className="flex gap-2">
-        <Button className="flex-1" disabled={isBlocked} onClick={handleAddToCart}>
+        <Button
+          className="flex-1"
+          disabled={isBlocked}
+          onClick={handleAddToCart}
+          data-testid="buybox-add-to-cart"
+        >
           Agregar al carrito
         </Button>
         <Button

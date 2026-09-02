@@ -43,6 +43,7 @@ export function OrderKanbanCard({ order, draggable, statusLabel }: OrderKanbanCa
         isDragging && "z-10 opacity-70",
       )}
       aria-label={draggable ? `${label}. Arrastra o usa las flechas para avanzarlo.` : label}
+      data-testid={`kanban-card-${order.id}`}
       {...(draggable ? attributes : {})}
       {...(draggable ? listeners : {})}
     >

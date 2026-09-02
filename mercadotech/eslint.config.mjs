@@ -20,6 +20,15 @@ const eslintConfig = [
     // mismo motivo: es salida generada, no código propio.
     ignores: [".next/**", "out/**", "build/**", "next-env.d.ts", "mcp/dist/**", "coverage/**"],
   },
+  {
+    // e2e/ no es código React: el fixture de Playwright (Fase 6.4) recibe un
+    // parámetro llamado `use` por convención de su propia API — no tiene
+    // relación con React. react-hooks lo confunde con un Hook por el nombre.
+    files: ["e2e/**/*.ts"],
+    rules: {
+      "react-hooks/rules-of-hooks": "off",
+    },
+  },
 ];
 
 export default eslintConfig;

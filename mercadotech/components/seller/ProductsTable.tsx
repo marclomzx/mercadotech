@@ -36,7 +36,7 @@ export function ProductsTable({ products, onToggleActive, onDelete }: ProductsTa
         </TableHeader>
         <TableBody>
           {products.map((product) => (
-            <TableRow key={product.id}>
+            <TableRow key={product.id} data-testid={`seller-product-row-${product.id}`}>
               <TableCell>
                 <div className="flex items-center gap-3">
                   <ProductImage

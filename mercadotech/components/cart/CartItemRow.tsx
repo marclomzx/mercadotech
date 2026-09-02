@@ -66,7 +66,7 @@ export function CartItemRow({
           value={String(quantity)}
           onValueChange={(value) => value && onQuantityChange(id, Number(value))}
         >
-          <SelectTrigger className="w-20" aria-label="Cantidad">
+          <SelectTrigger className="w-20" aria-label="Cantidad" data-testid="cart-item-quantity">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>

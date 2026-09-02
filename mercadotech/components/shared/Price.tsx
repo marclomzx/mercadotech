@@ -5,6 +5,7 @@ type PriceProps = {
   value: number | string;
   size?: "sm" | "md" | "lg";
   className?: string;
+  "data-testid"?: string;
 };
 
 const SIZE_CLASSES: Record<NonNullable<PriceProps["size"]>, string> = {
@@ -13,9 +14,9 @@ const SIZE_CLASSES: Record<NonNullable<PriceProps["size"]>, string> = {
   lg: "text-2xl font-bold",
 };
 
-export function Price({ value, size = "md", className }: PriceProps) {
+export function Price({ value, size = "md", className, "data-testid": testId }: PriceProps) {
   return (
-    <span className={cn(SIZE_CLASSES[size], className)}>
+    <span className={cn(SIZE_CLASSES[size], className)} data-testid={testId}>
       {formatPrice(value)}
     </span>
   );

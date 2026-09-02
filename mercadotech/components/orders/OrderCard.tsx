@@ -13,6 +13,7 @@ export function OrderCard({ order }: OrderCardProps) {
     <Link
       href={`/pedidos/${order.id}`}
       className="flex items-center justify-between gap-4 rounded-lg border p-4 transition-colors hover:border-primary"
+      data-testid={`order-card-${order.id}`}
     >
       <div className="space-y-1">
         {/* Id corto: el uuid completo no aporta nada al comprador. */}
