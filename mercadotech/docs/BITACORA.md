@@ -20,6 +20,330 @@ fuera a propósito.
 
 ---
 
+## Sesión 7 — Performance, secretos y despliegue a producción (2026-09-02)
+
+**El sitio salió a producción:** <https://mercadotech-gamma.vercel.app>
+
+Rango de commits: `5c31821` (cierre de la sesión 6) → `3754567`. Trece commits,
+11 archivos tocados, +1.544 / −144 líneas. La mayor parte es documentación: el
+código de producto cambió en 4 archivos y 48 líneas netas.
+
+La **Fase 7.1** (pipeline de CI) no se ejecutó en esta sesión: ya estaba
+construida en la 6.7. La spec lo reconoce y la marca como tal.
+
+---
+
+### Fase 7.2 — Performance y Core Web Vitals
+
+`6ca1721` · `874e763` · `64dd809` · `e031acd` · `9312035` · `2fbbb98` · `fb6e5bf`
+
+Se midió el estado inicial, se aplicaron optimizaciones **solo donde la medición
+las justificaba**, y se volvió a medir. La norma que gobernó la fase: ningún
+cambio sin su número de antes y de después; lo que no movió la aguja se revierte
+y se documenta como intento fallido.
+
+**Antes de medir hubo que arreglar el dataset.** Solo existía 1 objeto en el
+Storage local: casi todas las tarjetas caían al placeholder y el LCP habría
+salido artificialmente bueno. Se poblaron 16 imágenes reales con
+`scripts/seed-images.ts` antes de tomar ninguna cifra.
+
+**Bundle — First Load JS** (determinista, del resumen de `npm run build`):
+
+| Ruta | ANTES | DESPUÉS | Δ |
+|---|---|---|---|
+| `/vendedor/publicar` | 277 kB | **256 kB** | **−21 kB** |
+| `/vendedor/productos/[id]/editar` | 277 kB | **256 kB** | **−21 kB** |
+| `/vendedor/pedidos` | 217 kB | **204 kB** | **−13 kB** |
+| `/` (home) | 254 kB | 254 kB | — |
+| `/producto/[id]` | 258 kB | 258 kB | — |
+| _Compartido por todas_ | 102 kB | 102 kB | — |
+
+**Lighthouse móvil, contra build de producción local:**
+
+| Página | Performance | LCP | TBT | CLS |
+|---|---|---|---|---|
+| `/` (home) | **48** | 4,9 s | 3.650 ms | 0,084 |
+| `/producto/[id]` | **70** | 1,8 s | 3.280 ms | 0 |
+| `/asistente` | **76** | 2,8 s | 810 ms | 0 |
+
+**Cuatro intentos, dos aceptados, uno corregido y uno revertido:**
+
+1. `dynamic import` de `SortableImageGallery` — **aceptado**, −21 kB en las dos
+   rutas del formulario de producto.
+2. `dynamic import` de `OrdersKanban` — **aceptado**, −13 kB en el panel de
+   pedidos. Ambos aíslan dnd-kit, que solo necesita el vendedor.
+3. `ssr: false` en ambos imports — **corrección**. Se midió que el bundle era
+   idéntico con y sin él: no aportaba nada y añadía latencia de carga de chunk,
+   suficiente para que `seller-flow.spec.ts` superara su timeout de 30 s al
+   correr en paralelo (pasaba en 19,2 s aislado). Se quitó.
+4. `sizes` del grid + `priority` en la portada — **revertido** (`2fbbb98`).
+
+El cuarto merece detalle porque es el que enseña algo. Los números de después
+salieron **peores** (home 48 → 46, LCP 4,9 → 6,2 s). En vez de aceptarlos o
+descartarlos como ruido, se comprobó de forma determinista: ejecutando JS en el
+navegador se midió el ancho de imagen realmente solicitado a 375 px y 820 px de
+viewport — **idéntico** con el `sizes` viejo y el nuevo. Y con `curl` se
+verificó que el HTML del servidor **no contiene ninguna imagen de producto**, así
+que `priority` no tenía nada que priorizar. El cambio era un no-op. Se revirtió.
+
+**Un bug real encontrado de paso** (`9312035`): ESLint estaba analizando los
+artefactos del propio Playwright (`e2e/playwright-report/trace/assets/*.js`, el
+bundle minificado de su visor de trazas), 254 errores de código ajeno. Solo
+aparecía si existían artefactos E2E en disco — es decir, a cualquiera que
+siguiera la secuencia normal E2E → lint, y habría dictado `VALIDACIÓN FALLIDA`
+del validator de la 6.8 por algo que no es del proyecto.
+
+**Objetivos: qué se cumplió y qué no.**
+
+| Objetivo | Estado | Evidencia |
+|---|---|---|
+| Reducir el bundle de las rutas pesadas | ✅ | −21 kB y −13 kB, reproducibles |
+| Suites verdes tras cada cambio | ✅ | 292/292 unitarios · 8/8 E2E · lint · types · build |
+| CLS < 0,1 | ✅ | 0,083–0,084 |
+| LCP < 2,5 s en home | ❌ | 4,9–6,2 s |
+| Lighthouse ≥ 90 en home y catálogo | ❌ | **48 / 46** |
+
+**Por qué no se llegó al 90, sin rodeos.** Lighthouse pesa el TBT al 30 %; con
+2.580–3.650 ms ese 30 % puntúa casi cero, así que aunque el LCP fuera perfecto
+la home no pasaría de ~60. Y ninguna de las tres optimizaciones autorizadas toca
+el TBT: viven en rutas que la auditoría ni visita. El LCP malo nace de que **el
+catálogo se renderiza 100 % en el cliente** — el HTML del servidor llega sin
+productos, y la cadena hasta la primera foto es descargar JS → hidratar → pedir
+productos → pedir imagen. Ningún ajuste de `sizes` acorta esa cadena.
+
+La recomendación queda escrita en `docs/PERFORMANCE.md`: reescribir el catálogo
+como Server Component. Fuera del alcance de esta sesión, que endurece y publica
+lo existente sin features nuevas.
+
+---
+
+### Fase 7.3 — Gobernanza de variables y secretos
+
+`54e115f`
+
+`docs/DEPLOY.md` sección 1: tabla de gobernanza (qué variable vive dónde, quién
+la lee, pública o secreta), la fila que **no existe a propósito** —GitHub
+Actions no recibe ninguna variable ni ningún secreto— y los greps anti-fuga con
+su resultado pegado.
+
+Los greps de `hf_`, `sb_secret` y `eyJ` sobre el código: limpios. Las dos únicas
+coincidencias de `hf_` son el texto de un mensaje de error que explica el formato
+del token. `git log --all -p -- .env.local`: vacío, nunca se commiteó.
+
+**Desviación documentada:** la spec describe la tabla con 6 variables;
+`.env.example` tiene **8**. Los dos modelos de Hugging Face son filas separadas
+y existe `UNSPLASH_ACCESS_KEY`, que la spec no contempla. Se documentaron las 8.
+
+---
+
+### Fase 7.4 — Despliegue en Vercel con base de datos remota
+
+`c925117` (seed de producción) · `0f50d16` (cambio del smoke) · `30f1ee3` (merge
+del PR #2) · `f6c804b` (documentación)
+
+Diez pasos, alternando trabajo automatizado y clics del operador humano en los
+dashboards.
+
+**1. `supabase/seed.prod.sql`** — 8 categorías + 10 artículos de FAQ. Cero
+usuarios, cero productos, cero pedidos. Validado antes de tocar producción:
+se cargó contra el esquema local dentro de una transacción que vacía esas dos
+tablas y termina en `rollback` — 8 + 10 filas, 0 productos, base local intacta.
+
+**2. Base hosted migrada** — las 24 migraciones aplicadas con `supabase db push`
+sin cortes. Resultado verificado en el dashboard: **15 tablas**, RLS activa,
+**2 buckets** (`product-images`, `avatars`), y el Advisor de Supabase sin
+incidencias. El punto de riesgo previsto era `create_storage_buckets.sql`, que
+hace `grant` sobre tablas propiedad de `supabase_storage_admin`: pasó limpio.
+
+**3-4. Producción sembrada e indexada** — el seed por el SQL Editor, y después
+`scripts/index-all.ts` con las variables de producción pasadas en línea, sin
+tocar `.env.local`. Resultado: **10 filas en `knowledge_embeddings`**, todas con
+`source_type = articulo_soporte`.
+
+**5. Confirm email desactivado** en Authentication.
+
+**6-7. Vercel** — repositorio importado por la interfaz. Root Directory
+`mercadotech` (la app vive en un subdirectorio; con `./` el build muere al
+instante), framework Next.js detectado, Node **24** para igualar el CI. Las
+variables cargadas **a mano**, marcadas para Production y Preview, antes de
+pulsar Deploy. Primer despliegue verde a la primera.
+
+Verificación externa del primer deploy: HTTP 200 en 1,36 s; `/`,
+`/categoria/laptops`, `/buscar` y `/login` en 200; `/soporte`, `/carrito` y
+`/vendedor/productos` en **307** (el middleware protegiendo lo que debe);
+`/no-existe` en 404; y **ninguna clave secreta en el HTML servido**.
+
+**8. Branch protection** en `main`: PR obligatorio, `checks` y `e2e` como status
+checks requeridos, y sin permitir bypass — aplica también al dueño del repo. Sin
+exigir aprobaciones: en un repo de una sola persona, GitHub no deja aprobar el
+PR propio y la regla dejaría a su dueño encerrado.
+
+**9. Ciclo completo demostrado** (PR #2, rama `deploy-smoke`, un cambio de una
+línea en el footer). La secuencia quedó capturada en sus dos estados:
+
+- Con el CI en curso: *"Some checks haven't completed yet"*, botón de merge en
+  gris, ambos checks etiquetados **`Required`**, y el Preview de Vercel ya
+  desplegado con URL propia.
+- Con el CI terminado: *"All checks have passed"*, botón verde.
+  `checks` en **41 s**, `e2e` en **3 min** — la asimetría que justifica el
+  `needs: checks` del workflow.
+
+Tras el merge, producción sirvió el footer nuevo, verificado con `curl`.
+
+**10. Smoke test: 14/14 ✅** sobre la URL real. Home, favicon, rutas públicas y
+protegidas, 404, registro de un vendedor real sin confirmación por correo,
+publicación de **5 productos con imagen**, catálogo, detalle, `/soporte`
+respondiendo con citas a la FAQ de producción, búsqueda semántica, y
+logout/login.
+
+Las dos comprobaciones que más valen: publicar con imagen valida cuatro piezas
+que solo se prueban con un archivo real (subida al bucket → `getPublicUrl` →
+`next/image` → el `remotePattern` de `next.config.ts`); y `/soporte` valida la
+cadena RAG entera en producción — la respuesta reprodujo los plazos del artículo
+*"¿Cuánto tiempo tarda en llegar mi pedido?"* y lo citó como fuente `[1]`.
+
+#### Qué falló durante el go-live y cómo se resolvió
+
+| Síntoma | Causa real | Resolución |
+|---|---|---|
+| `supabase: no se reconoce como cmdlet` | La CLI **no estaba instalada** en la máquina del operador. El entorno de herramientas del asistente sí la tenía, y se reportó como si fuera el mismo sistema | `npm install -g supabase@2.116.0`. Corregido tras comprobar el Explorador de archivos del operador, que era la fuente de verdad |
+| `BadResource: FileSystem.makeDirectory (...\npm\supabase\.temp)` | `supabase link` ejecutado desde la carpeta global de npm, no desde el proyecto | Ejecutar desde `mercadotech/` |
+| `Invalid API key` al indexar | La clave se pegó **dentro del texto del prompt** de `Read-Host`, no como respuesta: la variable quedó vacía. Y era la clave publishable, no la secreta | Repetir con la sintaxis correcta y la clave `sb_secret_` |
+| Service role key parcialmente legible en una captura | Los tachones a mano no cubrieron lo suficiente | **Rotación**: nueva clave `sb_secret_`, sustituida en Vercel, y las claves legacy JWT deshabilitadas. Se aplicó la propia regla escrita en la 7.3 |
+| `Email signups are disabled` en el registro | Tres interruptores distintos gobiernan el registro y se apagó el que no era | `Enable Email provider` ON · `Allow new users to sign up` ON · `Confirm email` OFF |
+
+#### Decisiones ejercidas en esta fase
+
+**Todo el despliegue por la interfaz de Vercel, y los secretos cargados a mano**
+(directiva del docente). No se instaló la CLI de Vercel, no se crearon tokens de
+despliegue y no se añadió ningún job de deploy al workflow. La consecuencia de
+diseño es limpia: **el repositorio es el único disparador**. GitHub Actions
+valida, Vercel despliega, y ninguno de los dos conoce al otro ni comparte
+credenciales con el otro.
+
+**El seed de producción no crea usuarios ni productos.** El de laboratorio tiene
+6 usuarios con contraseña compartida escrita en claro y 16 productos inventados:
+eso no puede vivir en un sitio público. Consecuencia buscada y visible: el
+catálogo de producción **nace vacío** y muestra el `EmptyState` hasta que un
+vendedor real publica. No es un bug.
+
+**Los previews comparten la base de datos de producción.** Un solo proyecto
+Supabase en plan gratuito. El riesgo es real y queda señalado: un deploy de
+preview lee y escribe datos reales. Aceptable en un laboratorio; en un producto
+se separaría por entorno.
+
+**"Confirm email" desactivado** en el proyecto de producción. Es una concesión de
+laboratorio: con él activo, Supabase exige un clic en un correo que no llega,
+porque el SMTP de cortesía solo envía a direcciones del equipo del proyecto. En
+un producto real se deja activado, con SMTP propio.
+
+---
+
+### Fase 7.5 — Documentación final
+
+`3754567`
+
+- **`docs/PLAN_CURSO.md`** — el README anterior (el plan del curso) movido
+  **intacto**, verificado línea por línea contra el original en git; la única
+  diferencia es CRLF → LF. Lleva una nota de contexto al inicio.
+- **`README.md`** — nuevo, de producto: qué hace, stack, capas con su porqué,
+  flujo del RAG, puesta en marcha desde `git clone` paso a paso, comandos,
+  testing con su prerrequisito, deploy, URL de producción y estructura comentada.
+- **`mercadotech/README.md`** — era el de `create-next-app`, sin una línea cierta
+  sobre el proyecto. Ahora apunta al README de producto. *No estaba en la spec;
+  se cambió porque dejarlo contradecía el objetivo de la fase.*
+- **`docs/ARQUITECTURA.md`** — 471 → 670 líneas. La cabecera decía "hasta el
+  cierre de la sesión 2" y "no hay todavía pantallas, hooks, services ni
+  endpoints": falso desde hacía cuatro sesiones. Secciones nuevas 9 a 13
+  (frontend, RAG, Skills + MCP, testing + CI, despliegue) y una tabla de
+  desviaciones donde gana el código.
+- **`docs/DEPLOY.md`** — sección de rollback: cuándo usarlo, los clics exactos,
+  cómo arreglarlo de verdad después con `git revert` + PR, y **qué NO revierte**
+  (migraciones, datos de usuarios, Storage, embeddings, configuración de Supabase
+  y variables de entorno, porque el build ya las lleva incrustadas).
+
+**Prueba del desarrollador nuevo**, ejecutando los comandos del README en su
+orden: `npm ci` ✅ (516 paquetes) · `supabase status` ✅ · `.env.example` ✅ ·
+`lint` ✅ · `type-check` ✅ · `test` ✅ **292/292 en 21 archivos** · `build` ✅
+19 páginas. Enlaces relativos de los cinco documentos: 0 rotos.
+
+`npm ci` falló en el primer intento con `EPERM ... next-swc.win32-x64-msvc.node`:
+el servidor de producción que quedó corriendo desde la 7.2 tenía bloqueado el
+binario nativo de Next, y `npm ci` necesita borrar `node_modules` entero. Se
+cerró ese proceso y se repitió. El aviso quedó escrito en el README, porque
+cualquiera con `npm run dev` abierto choca con lo mismo.
+
+---
+
+### Desviaciones respecto de la spec
+
+Donde la especificación y el código no coinciden, manda el código:
+
+| Dice la spec | Dice el repositorio |
+|---|---|
+| El build usa Turbopack (decisión 3) | `"build": "next build"`, sin el flag. Es webpack. La decisión de no usar bundle-analyzer se mantuvo igualmente, por restricción explícita de la fase |
+| `.env.example` tiene 6 variables | Tiene **8** |
+| `NEXT_PUBLIC_SITE_URL` sirve para los redirects de auth | **Ningún archivo la lee.** La sesión se maneja con cookies en `lib/supabase/middleware.ts`. Se carga igual, por coherencia, pero hoy es inerte |
+| El repositorio es `growlearnjo/mercadotech` | Es `marclomzx/mercadotech`. El operador ya lo había corregido en su copia de la spec |
+| Lighthouse ≥ 90 en home y catálogo | **48 / 46.** No alcanzado; ver el análisis de la 7.2 |
+
+---
+
+### Qué quedó fuera, a propósito
+
+- **Un proyecto Supabase de staging.** Los previews siguen sobre la base de
+  producción (decisión aceptada, riesgo documentado en `DEPLOY.md`).
+- **E2E contra los previews dentro del CI.** Queda **anotado** en `DEPLOY.md`
+  como herramienta manual (`PLAYWRIGHT_BASE_URL=<url> npx playwright test`), no
+  como parte del pipeline: ningún test debe apuntar a producción, y un preview
+  escribe en ella.
+- **Bundle analyzer.** Prohibido por la fase; la medición se hizo con el resumen
+  de tamaños por ruta de `next build`, que es determinista y suficiente.
+- **El rollback está documentado pero no ejercitado.** No hubo ningún despliegue
+  roto que lo justificara, y provocar uno para probarlo habría dejado el sitio
+  público caído. Pendiente de validar la primera vez que haga falta.
+- **Lighthouse contra la URL de Vercel.** Todas las mediciones son locales. La
+  medición que cuenta para el criterio de aceptación —el servidor sin competir
+  por CPU con Docker y 12 contenedores— **no se tomó**.
+
+---
+
+### Criterios de aceptación de la sesión
+
+| Criterio | Estado | Evidencia |
+|---|---|---|
+| PR de prueba con CI y preview de URL propia; merge bloqueado en rojo y permitido en verde; el merge actualiza producción | ✅ | PR #2. Capturas de los dos estados; `checks` 41 s, `e2e` 3 min; footer nuevo verificado con `curl` en producción |
+| La URL de producción pasa el smoke test completo | ✅ | 14/14, incluyendo 5 productos publicados con imagen y `/soporte` citando la FAQ |
+| Lighthouse ≥ 90 en Performance para home y catálogo | ❌ | 48 / 46 en local. **No se midió contra la URL de Vercel** |
+| Un desarrollador nuevo levanta el proyecto solo con el README | ✅ | Secuencia completa ejecutada en orden, todos exit 0 |
+| `lint`, `type-check`, `test` y `build` verdes al cierre | ✅ | Los cuatro exit 0; 292/292 tests |
+
+### Entregables
+
+| # | Entregable | Estado | Evidencia |
+|---|---|---|---|
+| 1 | Branch protection con `checks` y `e2e` obligatorios | ✅ | API pública: `protected: true`; PR #2 bloqueado en amarillo |
+| 2 | `docs/PERFORMANCE.md` con métricas antes/después | ✅ | 276 líneas; 4 intentos, 2 aceptados, 1 corregido, 1 revertido |
+| 3 | `docs/DEPLOY.md` completo (variables, flujo, smoke, rollback) | ✅ | 419 líneas, 5 secciones |
+| 4 | App desplegada sobre la BD hosted migrada y sembrada | ✅ | <https://mercadotech-gamma.vercel.app> |
+| 5 | `README.md` de producto + `PLAN_CURSO.md` + `ARQUITECTURA.md` al día | ✅ | `3754567` |
+| 6 | Bitácora y `CLAUDE.md` actualizados | ✅ | Esta entrada |
+
+---
+
+### Pendientes para la sesión 8
+
+- **La 8 reutiliza `get_order_status` del servidor MCP** y amplía `/soporte` con
+  voz (STT/TTS del navegador) sobre la base de conocimiento y los tickets que ya
+  existen.
+- Medir Lighthouse contra la URL de Vercel, que es la medición que el criterio de
+  aceptación pedía de verdad.
+- El catálogo como Server Component, si se quiere atacar el LCP en serio
+  (recomendación medida en `docs/PERFORMANCE.md`).
+- **Deuda heredada que sigue abierta:** `supabase/tests/` continúa con solo un
+  `.gitkeep` — faltan los scripts de validación de RLS de la Fase 2.6; y de la
+  sesión 1 siguen sin existir `docs/COSTOS.md` y `docs/PROMPTS.md`.
+
 ## Sesión 6 — Testing, debugging y CI con GitHub Actions (2026-09-01 / 2026-09-02)
 
 **Alcance:** red de seguridad completa sobre MercadoTech: 292 tests unitarios

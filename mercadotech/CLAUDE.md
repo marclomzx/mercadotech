@@ -108,7 +108,7 @@ colocados en `app/` (`ShopNavbar.tsx`, `SellerGuard.tsx`, `CatalogView.tsx`,
 grep -rl "@/lib/supabase" components hooks
 grep -rl "from \"@/services" components
 grep -rln "@huggingface" --include="*.ts" . | grep -v node_modules | grep -v lib/ai
-grep -rl "lib/supabase/admin" app components hooks services | grep -v "api/v1"
+grep -rl 'from "@/lib/supabase/admin"' app components hooks services | grep -v "api/v1"
 grep -rlE "from \"@/(app|components|hooks)" mcp/src
 ```
 
@@ -168,26 +168,55 @@ del comprador. `/carrito`, `/pedidos`, `/favoritos`, `/vendedor`,
 (la IA exige sesión); el catálogo, el detalle y la búsqueda por texto son
 públicos — solo la pestaña "Resultados con IA" de `/buscar` pide sesión.
 
+## Deploy y producción (sesión 7)
+
+**En producción:** <https://mercadotech-gamma.vercel.app> (Supabase hosted).
+
+* Deploy: PR → preview de Vercel; merge a `main` (checks obligatorios) →
+  producción. `main` está protegida: `checks` y `e2e` requeridos, sin bypass
+  ni para el dueño. **Ni siquiera un cambio de una línea en docs entra por
+  push directo.**
+* Secretos SOLO en el dashboard de Vercel, cargados a mano; Actions no usa
+  ninguno. Tras cambiar una env: **redeploy** (el build ya hecho lleva los
+  valores incrustados). Nunca en el repo, ni en el chat, ni en logs.
+* Producción nace con catálogo VACÍO a propósito (`supabase/seed.prod.sql`:
+  categorías + FAQ, sin usuarios ni productos). El `EmptyState` es correcto.
+* **Medir → cambiar → medir.** Ninguna optimización entra sin su número de
+  antes y de después; lo que no mueve la aguja se revierte y se anota como
+  intento fallido. Registro en [docs/PERFORMANCE.md](docs/PERFORMANCE.md).
+  Toda medición contra build de producción, jamás contra `next dev`.
+* Variables, flujo, smoke test y rollback en
+  [docs/DEPLOY.md](docs/DEPLOY.md).
+
 ## Estado del proyecto
 
 * **Completadas:** sesión 2 (infraestructura), sesión 3 (MVP funcional),
   sesión 4 (RAG: búsqueda semántica, asesor de compras, soporte con
   tickets), sesión 5 (servidor MCP de solo lectura + 4 Skills de
-  gobernanza) y sesión 6 (292 tests unitarios + 8 E2E + CI en GitHub
-  Actions, verde).
+  gobernanza), sesión 6 (292 tests unitarios + 8 E2E + CI en GitHub
+  Actions, verde) y sesión 7 (performance medida, gobernanza de secretos,
+  despliegue a Vercel y documentación).
 * **Pendientes heredados:** sesión 1 completa (`docs/COSTOS.md`,
   `docs/PROMPTS.md`) y Fase 2.6 (`supabase/tests/` vacío: faltan los scripts
   de validación RLS).
-* **Siguiente:** sesión 7 — performance, secretos y despliegue a Vercel (el
-  CI ya quedó resuelto en la sesión 6, no vuelve a aparecer). El sitio
-  todavía NO está en línea: la app apunta a Supabase local.
-* Detalle por fase, decisiones y limitaciones vigentes en
-  [docs/BITACORA.md](docs/BITACORA.md); casos de prueba y calibración del
-  RAG en [docs/RAG.md](docs/RAG.md); pasada de calidad de la sesión 3 en
-  [docs/SESION3_CHECKLIST.md](docs/SESION3_CHECKLIST.md); arquitectura en
-  [docs/ARQUITECTURA.md](docs/ARQUITECTURA.md).
+* **Limitación vigente:** Lighthouse quedó en 48/46 (objetivo ≥ 90) y no se
+  midió contra la URL de Vercel. La causa está medida y documentada: el
+  catálogo se renderiza en cliente y el TBT es el techo — ver
+  [docs/PERFORMANCE.md](docs/PERFORMANCE.md).
+* **Siguiente:** sesión 8 — agente de voz de soporte (STT/TTS) sobre la base
+  de conocimiento y los tickets existentes; reutiliza `get_order_status` del
+  servidor MCP.
+* Puerta de entrada para alguien nuevo: el [README](../README.md) de la raíz
+  (qué es, cómo levantarlo, comandos). Detalle por fase, decisiones y
+  limitaciones en [docs/BITACORA.md](docs/BITACORA.md); arquitectura en
+  [docs/ARQUITECTURA.md](docs/ARQUITECTURA.md); casos del RAG en
+  [docs/RAG.md](docs/RAG.md); pasada de calidad de la sesión 3 en
+  [docs/SESION3_CHECKLIST.md](docs/SESION3_CHECKLIST.md). El plan del curso
+  se conserva en [docs/PLAN_CURSO.md](docs/PLAN_CURSO.md).
 
 ## Variables de entorno
 
-Ver `.env.example`. Copiar a `.env.local` y completar con los valores del
-proyecto Supabase (Project Settings > API).
+Ver `.env.example` (8 variables). En local: copiar a `.env.local` y
+completar con `supabase status -o env`. En producción viven en Vercel — ver
+la tabla de gobernanza de [docs/DEPLOY.md](docs/DEPLOY.md), que dice de cada
+una dónde vive, quién la lee y si es pública o secreta.
