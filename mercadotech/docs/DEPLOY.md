@@ -16,9 +16,14 @@ reescribe `.env.example` ni ningún código (decisión 5, ver
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Vercel (ambos entornos), a mano | navegador y servidor (RLS gobierna) | pública |
 | `SUPABASE_SERVICE_ROLE_KEY` | Vercel (ambos), a mano — solo runtime de servidor | `lib/supabase/admin.ts` en Route Handlers | **SECRETA** |
 | `HUGGINGFACEHUB_API_TOKEN` | Vercel (ambos), a mano | `lib/ai/` vía Route Handlers | **SECRETA** |
-| `NEXT_PUBLIC_SITE_URL` | Vercel, por entorno (prod = URL real; preview = auto) | redirects de auth | pública |
+| `NEXT_PUBLIC_SITE_URL` | Vercel, por entorno (prod = URL real; preview = auto) | nadie todavía † | pública |
 | `HUGGINGFACE_EMBEDDING_MODEL` / `HUGGINGFACE_CHAT_MODEL` (opcionales) | Vercel solo si se necesita rotar modelo | `lib/ai/` | pública |
 | `UNSPLASH_ACCESS_KEY` | Local únicamente (`.env.local` del desarrollador) | `scripts/seed-images.ts` — mantenimiento del seed, no corre en producción | pública* |
+
+† La spec describe `NEXT_PUBLIC_SITE_URL` como "redirects de auth", pero
+**ningún archivo de código la lee** en este repositorio — ver
+[§5, hallazgos del go-live](#next_public_site_url-no-la-lee-nadie). Se carga
+igualmente, pero hoy es inerte.
 
 *`UNSPLASH_ACCESS_KEY` no está en la tabla de la spec original (que lista 6
 variables); la incluyo aquí porque existe en `.env.example` y hay que decir
@@ -102,10 +107,8 @@ grep -rn "eyJ" --include="*.ts" --include="*.tsx" --include="*.mjs" \
 
 Resultado: vacío.
 
-Grep adicional (no pedido por la spec, pero mismo espíritu: el proyecto
-Supabase hosted todavía no existe — Fase 7.4 — así que tampoco puede haber
-su ref filtrado todavía; se deja la búsqueda documentada para repetirla
-después de crear el proyecto prod):
+Grep adicional, mismo espíritu — el ref del proyecto Supabase hosted (la
+sub-referencia que forma `https://<ref>.supabase.co`):
 
 ```bash
 grep -rn "supabase\.co" --include="*.ts" --include="*.tsx" --include="*.mjs" \
@@ -123,9 +126,211 @@ ejemplo en el mock de tests — ningún ref de proyecto real):
 ./mercadotech/services/test-utils/supabase-mock.ts:224:              config.storage?.publicUrl ?? `https://mock.supabase.co/storage/${bucket}/${path}`;
 ```
 
+Y repetido tras crear el proyecto de producción (Fase 7.4), buscando el ref
+concreto sobre **lo que git tiene versionado**, que es lo que de verdad
+importa:
+
+```bash
+git grep -n "<ref-del-proyecto>" HEAD -- .
+```
+
+Resultado: vacío. El ref existe en el disco en
+`supabase/.temp/linked-project.json` —lo escribe `supabase link`— pero ese
+directorio está en `supabase/.gitignore` (línea 3: `.temp`) y el archivo **no
+está trackeado**, verificado con `git ls-files --error-unmatch`. El ref no es
+un secreto (viaja al navegador dentro de `NEXT_PUBLIC_SUPABASE_URL`), pero
+mantenerlo fuera del repositorio evita que una copia del proyecto apunte por
+accidente a la base de datos de producción de otra persona.
+
 ```bash
 git log --all -p -- .env.local
 ```
 
 Resultado: vacío (sin salida — nunca se commiteó ese archivo en ninguna
 rama).
+
+## 2. Infraestructura de producción
+
+| Pieza | Qué es | Dónde vive |
+|---|---|---|
+| Repositorio | `marclomzx/mercadotech` (público). La app Next vive en el subdirectorio `mercadotech/`, no en la raíz. | GitHub |
+| CI | `.github/workflows/ci.yml` — jobs `checks` y `e2e`, sin secretos (sesión 6). | GitHub Actions |
+| Base de datos | Proyecto `mercadotech-prod`, plan free, compute nano. 15 tablas, RLS activa, 2 buckets (`product-images`, `avatars`). | Supabase hosted |
+| Aplicación | Proyecto `mercadotech`, Root Directory `mercadotech`, Next.js, Node 24. | Vercel |
+| URL de producción | `https://mercadotech-gamma.vercel.app` | Vercel |
+
+**Root Directory `mercadotech` no es opcional.** La raíz del repo solo contiene
+`.github/`, los `.md` del curso y la carpeta de la app: no hay `package.json`
+arriba. Con el Root Directory por defecto (`./`) el build muere al instante.
+Vercel lo detectó solo al importar, pero es lo primero que hay que revisar si
+un proyecto nuevo no arranca.
+
+**Node 24 en Vercel** (Settings → General) para igualar el `NODE_VERSION: "24"`
+del workflow: lo que valida el CI y lo que sirve producción corren sobre el
+mismo runtime.
+
+## 3. Flujo de despliegue
+
+Vercel está conectado al repositorio por su **integración Git** (decisión 2).
+No hay CLI de Vercel, ni tokens de despliegue, ni jobs de deploy en el
+workflow: **el único disparador es el repositorio**. GitHub Actions valida;
+Vercel despliega; ninguno de los dos conoce al otro.
+
+```
+  rama de trabajo ──push──> GitHub
+         |
+         +- abrir PR
+              +--> GitHub Actions: checks -> e2e   (ambos REQUIRED)
+              +--> Vercel: build de Preview con URL propia
+                     |
+              merge bloqueado hasta que los dos checks estén en verde
+                     |
+              merge a main
+                     +--> Vercel: build de Production -> URL real
+                     +--> GitHub Actions: CI de nuevo sobre main
+```
+
+### El candado de `main`
+
+Reglas activas en Settings → Branches:
+
+* Require a pull request before merging (**sin** exigir aprobaciones — en un
+  repo de una sola persona, GitHub no deja aprobar el PR propio y la regla
+  dejaría a su dueño encerrado)
+* Require status checks to pass: **`checks`** y **`e2e`**
+* Do not allow bypassing the above settings — aplica también al dueño
+
+Nadie puede empujar a `main` directamente ni mergear con el CI en rojo.
+
+### Qué dispara qué
+
+| Acción | GitHub Actions | Vercel |
+|---|---|---|
+| `push` a una rama cualquiera | **nada** (el workflow solo escucha `main` y `pull_request`) | nada |
+| abrir un PR | `checks` → `e2e` | build de **Preview** |
+| `push` a la rama del PR | vuelve a correr | nuevo Preview |
+| merge a `main` | corre sobre `main` | build de **Production** |
+
+### Cambiar una variable de entorno
+
+Editar una variable en Vercel **no toca los deploys ya hechos** (decisión 10):
+el valor nuevo solo entra en el próximo build. El propio dashboard lo avisa
+("A new deployment is needed for changes to take effect"). Después de cambiar
+cualquier variable hay que **redesplegar** — o dejar que el siguiente merge lo
+haga, si no corre prisa.
+
+### Rollback
+
+Pendiente de documentar en la Fase 7.5.
+
+### Correr los E2E contra un Preview (manual, opcional)
+
+Los E2E del CI corren siempre contra un Supabase efímero: **ningún test apunta
+a producción**. Si alguna vez hace falta validar un Preview a mano:
+
+```bash
+PLAYWRIGHT_BASE_URL=<url-del-preview> npx playwright test --project=chromium
+```
+
+Es una herramienta puntual, **no parte del CI**, y hay que usarla sabiendo que
+el Preview escribe en la base de datos de producción (decisión 9): los E2E
+crean pedidos y publican productos reales.
+
+## 4. Smoke test de producción
+
+Ejecutado el 2026-09-02 sobre `https://mercadotech-gamma.vercel.app`, tras el
+primer despliegue y el merge del PR #2.
+
+| # | Comprobación | Resultado |
+|---|---|---|
+| 1 | La home carga (HTTP 200) | ✅ |
+| 2 | Catálogo VACÍO con `EmptyState` — esperado, decisión 6 | ✅ |
+| 3 | Favicon correcto en la pestaña | ✅ |
+| 4 | Rutas públicas responden 200: `/`, `/categoria/laptops`, `/buscar`, `/login` | ✅ |
+| 5 | Rutas protegidas redirigen (307): `/soporte`, `/carrito`, `/vendedor/productos` | ✅ |
+| 6 | Ruta inexistente devuelve 404 | ✅ |
+| 7 | Registro de un vendedor real, sin confirmación por correo | ✅ |
+| 8 | Publicar productos con imagen desde la UI | ✅ (5 productos) |
+| 9 | Los productos aparecen en el catálogo con su imagen | ✅ |
+| 10 | La página de detalle abre correctamente | ✅ |
+| 11 | `/soporte` responde citando la FAQ de producción | ✅ |
+| 12 | Búsqueda semántica encuentra por significado, no por texto literal | ✅ |
+| 13 | Logout / login | ✅ |
+| 14 | El merge del PR llega a producción (footer nuevo visible) | ✅ |
+
+**Lo que prueban los puntos 8 y 9 juntos:** las imágenes suben al bucket
+`product-images`, el service resuelve su URL pública con `getPublicUrl`,
+`next/image` la optimiza y el `remotePattern` `*.supabase.co` de
+`next.config.ts` la deja pasar. Cuatro piezas que solo se validan de verdad
+con un archivo real de por medio.
+
+**Lo que prueba el punto 11:** la cadena completa del RAG en producción —
+pregunta → embedding en Hugging Face → búsqueda vectorial sobre
+`knowledge_embeddings` → contexto → respuesta con citas numeradas. La
+respuesta reprodujo los plazos del artículo *"¿Cuánto tiempo tarda en llegar
+mi pedido?"* y lo listó como fuente `[1]`.
+
+## 5. Hallazgos del go-live
+
+Cosas que costaron tiempo y conviene no volver a descubrir.
+
+### Los tres interruptores del registro
+
+El registro por correo depende de **tres** ajustes repartidos en la misma
+página de Supabase (Authentication → Sign In / Providers), y apagar el que no
+es produce errores que no se parecen entre sí:
+
+| Ajuste | Dónde | Debe estar | Si está mal |
+|---|---|---|---|
+| `Enable Email provider` | Auth Providers → Email | **encendido** | *"Email signups are disabled"* |
+| `Allow new users to sign up` | tarjeta User Signups | **encendido** | el registro se rechaza sin más |
+| `Confirm email` | tarjeta User Signups | **apagado** | la cuenta se crea pero no se puede entrar (decisión 8) |
+
+`Confirm email` está apagado **a propósito**: es una concesión de laboratorio.
+Con él encendido, Supabase exige un clic en un correo de confirmación que no
+llega, porque el SMTP de cortesía solo envía a direcciones del equipo del
+proyecto. En un producto real se deja **encendido**, con SMTP propio.
+
+### Rotación de la service role key
+
+Durante el go-live la service role key quedó parcialmente visible en una
+captura de pantalla. Se aplicó la regla de la sección 1 sin excepción: se creó
+una clave nueva en formato `sb_secret_`, se sustituyó en Vercel, y se
+**deshabilitaron las claves legacy en formato JWT** desde Supabase (Settings →
+API Keys → Legacy API keys → *Disable JWT-based API keys*).
+
+Nada se rompió al revocarlas: la anon key ya era del formato nuevo
+(`sb_publishable_`), el entorno local usa el Supabase de Docker con sus propias
+claves, y la indexación de la FAQ ya se había ejecutado.
+
+**Recomendación derivada:** no revelar una clave secreta antes de capturar la
+pantalla. Los tachones a mano no cubren lo suficiente.
+
+### `NEXT_PUBLIC_SITE_URL` no la lee nadie
+
+Está declarada en `.env.example`, en `.env.local` y en el workflow del CI, pero
+**ningún archivo de código la consume** (verificado con `grep -rn` sobre todo
+el repositorio). La tabla de gobernanza de la sección 1 la describe como
+"redirects de auth", y eso no es cierto en este repositorio: la sesión se
+maneja con cookies en `lib/supabase/middleware.ts`, que no necesita una URL
+absoluta.
+
+Se carga igualmente en Vercel (entorno Production) por coherencia con lo
+documentado y porque el día que haga falta —recuperación de contraseña,
+enlaces en correos— ya estará puesta. Pero hoy es **inerte**: no puede ser la
+causa de ningún fallo.
+
+### Tipos de variable en Vercel
+
+Vercel distingue entre **Config** (legible después de guardar) y **Secret**
+(write-only). La distinción coincide exactamente con la columna
+pública/secreta de la tabla de la sección 1: las `NEXT_PUBLIC_*` deberían ser
+**Config** —marcarlas como Secret no protege nada, porque viajan al navegador
+igual, y solo impide releerlas para verificar un valor— y
+`SUPABASE_SERVICE_ROLE_KEY` y `HUGGINGFACEHUB_API_TOKEN` deben ser **Secret**.
+
+Una variable guardada como Secret **no se puede convertir a Config**: hay que
+borrarla y volver a crearla. Por eso `NEXT_PUBLIC_SUPABASE_URL` y
+`NEXT_PUBLIC_SUPABASE_ANON_KEY` quedaron como Secret en este proyecto — se
+crearon así durante la importación. No afecta al funcionamiento (ambos tipos se
+inyectan igual en el build); solo impide releer su valor desde el dashboard.
