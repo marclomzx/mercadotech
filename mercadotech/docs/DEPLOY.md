@@ -221,7 +221,90 @@ haga, si no corre prisa.
 
 ### Rollback
 
-Pendiente de documentar en la Fase 7.5.
+Vercel guarda **todos** los despliegues anteriores, ya construidos y servibles.
+Volver atrás no reconstruye nada: se limita a apuntar el dominio de producción
+a un build que ya existe. Por eso tarda segundos y no puede fallar por un error
+de compilación.
+
+### Cuándo usarlo
+
+Cuando producción está rota **y no sabes todavía por qué**. Primero se restaura
+el servicio, después se investiga con calma. Diagnosticar con el sitio caído es
+la forma más rápida de tomar malas decisiones.
+
+No lo uses para un fallo que ya tienes localizado y cuyo arreglo es de una
+línea: para eso, el camino normal —rama, PR, CI, merge— tarda unos minutos más
+y deja el historial limpio.
+
+### Cómo se hace
+
+1. Vercel → pestaña **Deployments** del proyecto
+2. Localiza el último despliegue que **sí funcionaba** (la lista muestra el
+   commit y la hora de cada uno)
+3. Menú **⋯** de esa fila → **Promote to Production**
+
+   *(Si esa opción no aparece, **Redeploy** sobre ese despliegue produce el
+   mismo resultado: reconstruye ese commit y lo publica.)*
+
+→ El dominio de producción sirve esa versión en segundos.
+
+### Después del rollback: arreglar de verdad
+
+Promover un despliegue antiguo **no cambia el código de `main`**. El commit
+defectuoso sigue siendo la punta de la rama, y el siguiente merge volverá a
+desplegarlo. El rollback compra tiempo; no arregla nada.
+
+Para deshacerlo en el repositorio, con el candado de `main` puesto, el camino es
+el normal:
+
+```bash
+git checkout main && git pull
+git checkout -b fix/revertir-<lo-que-sea>
+git revert <sha-del-commit-defectuoso>
+git push -u origin fix/revertir-<lo-que-sea>
+```
+
+Después: PR → CI en verde → merge. El merge despliega solo, y producción vuelve
+a estar alineada con `main`.
+
+Se usa `git revert` y no `reset`: crea un commit nuevo que deshace el anterior,
+sin reescribir historia — que además `main` no permitiría.
+
+### Qué NO revierte un rollback de Vercel
+
+Esto es lo importante y lo que más sorprende:
+
+**La base de datos no vuelve atrás.** Vercel solo sirve la aplicación; los datos
+viven en Supabase y ni los toca. Un rollback deja una app antigua hablando con
+una base de datos actual.
+
+En concreto, **nada de esto se deshace**:
+
+| No se revierte | Por qué |
+|---|---|
+| Las migraciones aplicadas con `supabase db push` | Vercel no ejecuta migraciones y no sabe que existen |
+| Los datos escritos por los usuarios | Pedidos, productos, reseñas: son datos reales, no artefactos del build |
+| Los archivos subidos a Storage | Viven en el bucket de Supabase |
+| Los embeddings de `knowledge_embeddings` | Los genera un script contra la base, no el build |
+| Los cambios de configuración de Supabase | Ajustes de Auth, políticas RLS, claves |
+| Las variables de entorno de Vercel | El rollback promueve un build; **el build ya tiene los valores incrustados con los que se construyó** |
+
+**El caso peligroso:** un despliegue que incluye una migración con un cambio de
+esquema incompatible hacia atrás — renombrar una columna, por ejemplo. Al
+promover el despliegue anterior, esa app antigua sigue pidiendo la columna con
+el nombre viejo, que ya no existe. El rollback no arregla el problema: lo
+convierte en otro distinto.
+
+**Regla práctica:** si el despliegue roto traía una migración, el rollback de
+Vercel **no basta**. Hay que revertir el esquema con una migración nueva —
+`supabase migration new` que deshaga el cambio, y `supabase db push`— porque el
+esquema de la base solo se toca por migraciones del repositorio, nunca a mano en
+el dashboard.
+
+**La forma de no llegar ahí** es escribir las migraciones para que sean
+compatibles hacia atrás mientras convive con ellas la versión anterior de la
+app: añadir una columna nueva en vez de renombrar, y eliminar la vieja en un
+despliegue posterior, cuando ya nada la use.
 
 ### Correr los E2E contra un Preview (manual, opcional)
 

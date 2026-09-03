@@ -1,13 +1,15 @@
 # Arquitectura de MercadoTech
 
-Este documento describe la infraestructura construida hasta el cierre de la
-sesión 2: proyecto Next.js, base de datos, seguridad a nivel de fila (RLS),
-Storage y datos de prueba. Está escrito para alguien que se une al proyecto
-sin haber estado en las sesiones anteriores.
+Este documento describe **lo que está construido y por qué**, no lo que se
+planeó. Está escrito para alguien que se une al proyecto sin contexto previo.
 
-No hay todavía pantallas, hooks, services de negocio ni endpoints — eso es
-la sesión 3. Lo que existe hoy es la infraestructura sobre la que se va a
-construir.
+Las secciones 1 a 8 cubren los cimientos: capas, modelo relacional, integración
+con Supabase, autenticación y las políticas RLS. Las secciones 9 a 13 cubren lo
+que se levantó encima: el frontend, el RAG, la gobernanza con Skills y MCP, la
+estrategia de testing y CI, y el despliegue.
+
+Si buscas cómo **levantar el proyecto en local**, eso está en el
+[README](../../README.md). Aquí está el porqué de cada decisión.
 
 ## Tabla de contenidos
 
@@ -19,7 +21,12 @@ construir.
 6. [Flujo de autenticación](#6-flujo-de-autenticación)
 7. [Estrategia de escalabilidad](#7-estrategia-de-escalabilidad)
 8. [Políticas RLS](#8-políticas-rls)
-9. [Qué sigue](#9-qué-sigue)
+9. [El frontend (sesión 3)](#9-el-frontend-sesión-3)
+10. [RAG: búsqueda semántica y asistentes (sesión 4)](#10-rag-búsqueda-semántica-y-asistentes-sesión-4)
+11. [Gobernanza: Skills y servidor MCP (sesión 5)](#11-gobernanza-skills-y-servidor-mcp-sesión-5)
+12. [Testing y CI (sesión 6)](#12-testing-y-ci-sesión-6)
+13. [Despliegue (sesión 7)](#13-despliegue-sesión-7)
+14. [Qué sigue](#14-qué-sigue)
 
 ---
 
@@ -461,11 +468,210 @@ sí funciona en el schema `public` **no funciona igual en el schema
 `postgres`) — ahí RLS es la única puerta real, verificado con pruebas
 directas.
 
-## 9. Qué sigue
+## 9. El frontend (sesión 3)
 
-- **Sesión 3** — todas las pantallas (catálogo, producto, carrito, panel de
-  vendedor), hooks, services de negocio, y el drag & drop de galería de
-  imágenes y kanban de pedidos.
-- **Sesión 4** — pgvector, embeddings de `support_articles` y búsqueda
-  semántica; asistente de compras y soporte por texto (RAG).
-- **Sesión 8** — agente de voz de soporte (STT/TTS) sobre `support_tickets`.
+Tres capas, un solo sentido de dependencia: `components/` → recibe props;
+`hooks/` → tiene el estado y llama a services; `services/` → habla con
+Supabase. Un componente nunca importa un service, y un service nunca importa
+React.
+
+**Los layouts son Server Components y no pueden usar hooks.** El puente son
+componentes cliente colocados dentro de `app/` —`ShopNavbar.tsx`,
+`CatalogView.tsx`, `SellerGuard.tsx`, `ProductDetailView.tsx`— que usan el hook
+y pasan props hacia abajo. Por eso `components/` puede permanecer puro.
+
+**La URL es la fuente de verdad de los filtros del catálogo.** `useSearchParams`
+gobierna categoría, condición, precio, orden y página. Cambiar un filtro
+reescribe la URL y vuelve a página 1. Consecuencia buscada: cualquier estado del
+catálogo es compartible y sobrevive a un refresco.
+
+**`numeric` de Postgres llega como `string`.** PostgREST serializa así los
+decimales para no perder precisión. La conversión con `Number()` ocurre **una
+vez, en el service**; los componentes siempre reciben `number`. Lo mismo con las
+imágenes: el service resuelve `image_path` → URL pública con `getPublicUrl`, y
+el componente recibe `image_url` lista.
+
+**Las transiciones del kanban viven en el hook, no en la base.** La RLS permite
+a un vendedor poner cualquiera de los estados `pagado`/`enviado`/`entregado`,
+pero **no valida la secuencia**: nada en SQL impide saltar de `pagado` a
+`entregado`. Esa regla es `canMove` en `useSellerOrders`. Es una limitación
+consciente y está anotada como tal — la defensa real de "quién" puede tocar el
+pedido sí está en RLS; la de "en qué orden" es de interfaz.
+
+**Drag & drop accesible.** dnd-kit con `KeyboardSensor` en la galería de
+imágenes y en el kanban: foco → `Espacio` → flechas → `Espacio`. No es un extra
+decorativo — es lo que hace que los E2E puedan operar el tablero de forma
+determinista.
+
+### Nota: el catálogo se renderiza en el cliente
+
+Medido durante la sesión 7: el HTML que devuelve el servidor para la home **no
+contiene ningún producto ni ninguna imagen**. Todo el catálogo se monta en el
+navegador tras la primera consulta a Supabase.
+
+Es coherente con la decisión de que la URL gobierne los filtros, pero tiene un
+coste real de rendimiento: la cadena de carga de la imagen más grande no puede
+acortarse desde el servidor. Está documentado con su medición en
+[`PERFORMANCE.md`](PERFORMANCE.md), junto con la recomendación de reescribir el
+catálogo como Server Component — fuera del alcance de la sesión 7.
+
+## 10. RAG: búsqueda semántica y asistentes (sesión 4)
+
+Una sola tabla, `knowledge_embeddings`, guarda las "fichas" numéricas tanto de
+productos como de artículos de soporte, discriminadas por `source_type`. La
+búsqueda es una función SQL, `match_knowledge()`, que ordena por distancia
+coseno sobre pgvector.
+
+```
+  INDEXAR:   texto ──► lib/ai/embeddings ──► vector(384) ──► knowledge_embeddings
+  CONSULTAR: pregunta ──► vector(384) ──► match_knowledge() ──► top-k
+                                                                  │
+                                            contexto + pregunta ──┴──► chat ──► respuesta con citas
+```
+
+**`lib/ai/` es la única frontera con el proveedor de IA.** Cuatro archivos
+—`embeddings`, `completion`, `prompts`, `context-builder`— y nada más los
+importa salvo los services y los Route Handlers. Cambiar de Hugging Face a otro
+proveedor toca esos cuatro archivos y ningún componente.
+
+**La IA es la única excepción al "un solo camino de datos".** El resto de la app
+va hooks → services → Supabase. La IA va hook → `fetch` a `app/api/v1/*` →
+service → `lib/ai/`. La razón es concreta y no negociable: el token de Hugging
+Face y la clave de service role **no pueden viajar al navegador**.
+
+**La dimensión del vector está fijada en SQL.** La columna es `vector(384)`,
+con su índice. Cambiar a un modelo de embeddings de otra dimensión no es cambiar
+una variable de entorno: exige `ALTER COLUMN` + recrear índice y función. La
+variable `HUGGINGFACE_EMBEDDING_MODEL` existe para cambiar de modelo *de la
+misma dimensión*.
+
+**El modelo de chat sí es intercambiable en caliente**, con
+`HUGGINGFACE_CHAT_MODEL`. La disponibilidad de modelos gratuitos rota: cuando el
+proveedor deja de servir el actual, se sustituye sin tocar código.
+
+**Reindexado asimétrico, a propósito.** Los productos se refichan solos al
+publicar o editar (la app dispara `/api/v1/reindex`, en modo *fire-and-forget*:
+si falla, avisa por consola y no bloquea la publicación). Los artículos de
+soporte **no tienen interfaz de edición**: se tocan por SQL y nada dispara su
+reindexado, así que `scripts/index-all.ts` es la única vía.
+
+Casos de prueba y calibración del umbral de similitud en [`RAG.md`](RAG.md).
+
+## 11. Gobernanza: Skills y servidor MCP (sesión 5)
+
+**Cuatro Skills** en `.claude/skills/` que Claude Code carga solo cuando la
+petición coincide con su descripción: `architecture-enforcer` (¿este archivo va
+aquí, con estas dependencias?), `code-reviewer` (informe sobre código ya
+escrito), `tech-lead` (juicio ponderado de diseño y deuda) y
+`automatic-validator` (veredicto binario sobre una checklist fija).
+
+**Las cuatro reportan; ninguna edita código.** La corrección siempre es un paso
+aparte y supervisado. Una herramienta que diagnostica *y* arregla en el mismo
+movimiento es una herramienta en la que se deja de mirar el diagnóstico.
+
+**El servidor MCP (`mcp/`) es un proceso Node aparte de la web**, de solo
+lectura, sobre stdio. Importa `services/`, `lib/ai/`, `lib/constants/` y
+`types/` — jamás `app/`, `components/` ni `hooks/`.
+
+**Sus clientes de Supabase se crean en `mcp/src/context.ts`, nunca reutilizando
+`lib/supabase/admin.ts`**: ese archivo lleva `server-only`, que revienta bajo
+Node puro fuera de Next. Es la clase de detalle que solo aparece cuando se
+comparte código entre dos runtimes distintos.
+
+Qué expone (10 Tools, 7 Resources, 5 Prompts) y cómo conectarlo, en
+[`../mcp/README.md`](../mcp/README.md).
+
+## 12. Testing y CI (sesión 6)
+
+**Dos niveles, dos estrategias de aislamiento distintas.**
+
+Los **unitarios** (Vitest) cubren lógica pura y services, y **no abren red**. El
+cliente Supabase se inyecta falso aprovechando que es el último parámetro de
+toda firma de service — nunca se hace `vi.mock` de `lib/supabase/*`. La única
+excepción es `lib/ai/*`, que sí se mockea por módulo, y está comentada en el
+test que la usa.
+
+Los **E2E** (Playwright, chromium) corren contra la app real y una base real.
+El test unitario vive junto al archivo que prueba; los E2E viven en `e2e/`, con
+patrón Page Object.
+
+**Los E2E corren contra un build de producción**, nunca contra `next dev`. En
+desarrollo, Fast Refresh y StrictMode introducen carreras que no existen en
+producción — se diagnosticó una concreta entre el cierre de un menú y la
+navegación de Next, imposible de reproducir contra el build.
+
+**`supabase db reset` es prerrequisito de cada corrida E2E.** Las specs afirman
+sobre datos concretos del seed y además escriben. Dos corridas seguidas sin
+resetear producen fallos que parecen bugs y no lo son.
+
+**El test documenta el contrato REAL, no el deseado.** Si un comportamiento
+parece un bug, se ancla al código y se anota; no se "corrige" en silencio desde
+el test.
+
+**El CI no recibe ni un secreto.** `.github/workflows/ci.yml` levanta un
+Supabase efímero dentro del runner y lee sus credenciales en caliente con
+`supabase status -o json`: son las claves demo públicas que la CLI genera
+siempre, sobre una base que muere con el job. Dos jobs, y el orden importa:
+`checks` (lint, tipos, unitarios) es barato y va primero; `e2e` tiene
+`needs: checks` porque no tiene sentido levantar Docker y un navegador para
+código que ni compila.
+
+**La versión de npm está fijada** en el workflow y debe coincidir siempre con
+`packageManager` de `package.json`. El lockfile se generó en Windows; un npm más
+nuevo en el runner espera entradas de dependencias opcionales de Linux que ese
+lockfile nunca escribió, y `npm ci` aborta.
+
+Diagnóstico de fallos, con los errores literales, en
+[`DEBUGGING.md`](DEBUGGING.md).
+
+## 13. Despliegue (sesión 7)
+
+**En producción:** <https://mercadotech-gamma.vercel.app>
+
+La aplicación corre en Vercel sobre un proyecto Supabase hosted, con las mismas
+24 migraciones que el entorno local. El catálogo de producción **nace vacío**:
+el seed de laboratorio (usuarios con contraseña conocida, productos inventados)
+jamás se ejecuta contra el sitio público. Lo que sí se siembra es contenido
+real: las 8 categorías y los 10 artículos de la base de conocimiento.
+
+**Vercel se conecta por integración Git; el repositorio es el único
+disparador.** No hay CLI de despliegue ni tokens: GitHub Actions valida, Vercel
+despliega, y ninguno de los dos conoce al otro. `main` está protegida y exige
+que `checks` y `e2e` pasen antes de cualquier merge, sin excepción para el
+dueño.
+
+**Los secretos solo viven en el dashboard de Vercel.** Ni en el repositorio, ni
+en GitHub Actions, ni en el bundle del cliente. La frontera es el prefijo:
+`NEXT_PUBLIC_*` se incrusta en el build y viaja al navegador; todo lo demás se
+queda en el servidor.
+
+**El rendimiento se mide siempre contra un build de producción.** Lighthouse
+sobre `next dev` da números falsos. Y la norma que gobernó las optimizaciones:
+ninguna entra sin su número de antes y de después, y lo que no movió la aguja se
+revierte y se documenta como intento fallido — hay una así en
+[`PERFORMANCE.md`](PERFORMANCE.md).
+
+Variables, flujo de despliegue, smoke test y rollback en
+[`DEPLOY.md`](DEPLOY.md).
+
+### Notas donde el código difiere de la planeación
+
+Se documenta lo construido. Donde el plan original y el código no coinciden,
+manda el código:
+
+| Dice el plan | Dice el código |
+|---|---|
+| `NEXT_PUBLIC_SITE_URL` sirve para los redirects de auth | **Ningún archivo la lee.** La sesión se maneja con cookies en `lib/supabase/middleware.ts`, que no necesita una URL absoluta. Se carga igual, por si hace falta más adelante, pero hoy es inerte |
+| El build usa Turbopack | `package.json` define `"build": "next build"`, sin `--turbopack`. El build es de webpack |
+| `.env.example` tiene 6 variables | Tiene **8**: los dos modelos de Hugging Face son filas separadas, y existe `UNSPLASH_ACCESS_KEY` para el script de imágenes del seed |
+
+## 14. Qué sigue
+
+- **Deuda heredada.** `supabase/tests/` sigue vacío: faltan los scripts de
+  validación de RLS previstos en la sesión 2. Las políticas se han verificado a
+  mano y por los E2E, pero no hay una suite que las fije.
+- **Mejoras identificadas y medidas**, no ejecutadas: el catálogo como Server
+  Component (ver §9 y `PERFORMANCE.md`), y un proyecto Supabase separado para
+  los previews de Vercel, que hoy comparten la base de datos de producción.
+- **Sesión 8** — agente de voz del centro de soporte (STT/TTS del navegador)
+  sobre la base de conocimiento y los tickets que ya existen.
